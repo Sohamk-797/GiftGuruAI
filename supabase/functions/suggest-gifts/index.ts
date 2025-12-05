@@ -299,7 +299,7 @@ serve(async (req: Request) => {
 
     // Build prompt (same content as original)
     const prompt = `You are an expert Indian gift curator. Generate ${isFirstBatch ? '9' : '6'} ${isFirstBatch ? '' : 'DIFFERENT'} personalized gift recommendations based on:
-
+    
 ${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
 ${requestData.age ? `Age: ${requestData.age} years old` : ''}
 Relation: ${requestData.relation}
@@ -339,7 +339,9 @@ Return ONLY a valid JSON array of ${isFirstBatch ? '9' : '6'} gifts with this st
   "ai_rationale": "Perfect for a nature-loving minimalist who adores indoor plants.",
   "delivery_estimate": "2-4 days in Mumbai",
   "vendor": "GreenCraft India"
-}]`;
+}]
+IMPORTANT: Respond with nothing but compact JSON. Do NOT include any prose, markdown, or code fences. Use double quotes for strings, no trailing commas, and produce an array only.  
+`;
 
     // Use Google Gemini (Generative Language API)
     // Model and endpoint
@@ -585,11 +587,11 @@ let giftsText: string | null = null;
       }
     }
 
-    // Parse final JSON from giftsText
-    // Parse final JSON from giftsText with a resilient heuristic (look for JSON array anywhere)
     let aiGifts: any[] = [];
     const textToParse = (giftsText || '').trim();
-    const tryParse = (txt: string) => {
+
+    const tryParse = (txt: string | null) => {
+      if (!txt) return null;
       try {
         return JSON.parse(txt);
       } catch (e) {
@@ -597,35 +599,85 @@ let giftsText: string | null = null;
       }
     };
 
+    // 1) Try direct parse first
     let parsed = tryParse(textToParse);
+
+    // 2) If that fails, try greedy substring between first '[' and last ']' (captures longest array)
     if (!parsed) {
-      // Try to extract first JSON array ([...] ) substring
-      const arrMatch = textToParse.match(/\[([\s\S]*?)\]/m);
-      if (arrMatch) {
-        const arrText = arrMatch[0];
+      const firstIdx = textToParse.indexOf('[');
+      const lastIdx = textToParse.lastIndexOf(']');
+      if (firstIdx !== -1 && lastIdx !== -1 && lastIdx > firstIdx) {
+        const arrText = textToParse.slice(firstIdx, lastIdx + 1);
         parsed = tryParse(arrText);
       }
     }
 
-    // As a last resort, try to extract a JSON object array style across fenced blocks
+    // 3) If still failing, try to extract JSON from fenced blocks (```json ... ```), prefer the last fenced block
     if (!parsed) {
-      const fenceMatch = textToParse.match(/```(?:json)?\s*([\s\S]*?)\s*```/m);
-      if (fenceMatch) {
-        parsed = tryParse(fenceMatch[1]);
+      const fenceRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
+      let match;
+      let lastFenceContent: string | null = null;
+      while ((match = fenceRegex.exec(textToParse)) !== null) {
+        if (match[1]) lastFenceContent = match[1];
+      }
+      if (lastFenceContent) {
+        // try parsing the fenced content directly
+        parsed = tryParse(lastFenceContent.trim());
+        // if fenced content still contains surrounding text, try greedy array inside it
+        if (!parsed) {
+          const fFirst = lastFenceContent.indexOf('[');
+          const fLast = lastFenceContent.lastIndexOf(']');
+          if (fFirst !== -1 && fLast !== -1 && fLast > fFirst) {
+            const arrText = lastFenceContent.slice(fFirst, fLast + 1);
+            parsed = tryParse(arrText);
+          }
+        }
       }
     }
 
+    // 4) As a last attempt: extract individual top-level object blocks `{ ... }` and parse each, collecting valid objects.
+    //    This recovers partial results when the array is truncated or commas are missing.
     if (!parsed) {
-      console.error('Failed to parse AI response as JSON. Raw content (first 5000 chars):', textToParse.slice(0, 5000));
-      throw new Error('AI returned malformed JSON. Check function logs for the raw AI output and retry.');
+      const objRegex = /{[\s\S]*?}/g;
+      const objs: any[] = [];
+      const raw = textToParse;
+      let m;
+      while ((m = objRegex.exec(raw)) !== null) {
+        const objText = m[0];
+        const p = tryParse(objText);
+        if (p && typeof p === 'object') {
+          objs.push(p);
+        } else {
+          // try to repair few common issues: trailing commas inside object -> remove `,(\s*[}\]])`
+          try {
+            const repaired = objText.replace(/,(\s*[}\]])/g, '$1'); // remove trailing commas before } or ]
+            const rp = tryParse(repaired);
+            if (rp && typeof rp === 'object') objs.push(rp);
+          } catch (ignored) {}
+        }
+      }
+      if (objs.length > 0) {
+        parsed = objs;
+      }
     }
 
+    // 5) If still null => give a helpful error
+    if (!parsed) {
+      console.error('Failed to parse AI response as JSON. Raw content (first 8000 chars):', textToParse.slice(0, 8000));
+      // Attach the raw text to error.details already handled by outer catch; throw a descriptive error.
+      const err: any = new Error('AI returned malformed or truncated JSON. Check function logs for raw AI output.');
+      err.code = 'ai_malformed_json';
+      err.details = textToParse.slice(0, 8000);
+      throw err;
+    }
+
+    // 6) Normalize to array
     if (!Array.isArray(parsed)) {
-      console.warn('Parsed AI output is not an array; attempting to coerce into array.');
-      parsed = Array.isArray(parsed) ? parsed : [parsed];
+      parsed = [parsed];
     }
 
     aiGifts = parsed;
+
 
     // FRONTEND_BASE_URL for buy links
     const FRONTEND_BASE_URL = Deno.env.get('VITE_FRONTEND_BASE_URL') || 'https://example.com';
