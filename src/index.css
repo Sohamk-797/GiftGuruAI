@@ -1,0 +1,220 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* GiftGuru Light Theme - Warm Pinks */
+    --background: 330 100% 98%;
+    --foreground: 330 30% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 330 30% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 330 30% 15%;
+
+    --primary: 340 82% 67%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 340 100% 75%;
+
+    --secondary: 330 100% 95%;
+    --secondary-foreground: 340 82% 67%;
+
+    --muted: 330 40% 96%;
+    --muted-foreground: 330 20% 50%;
+
+    --accent: 350 85% 70%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 330 30% 90%;
+    --input: 330 30% 90%;
+    --ring: 340 82% 67%;
+
+    --radius: 1rem;
+
+    /* Custom GiftGuru tokens */
+    --gradient-hero: linear-gradient(135deg, hsl(340, 82%, 67%), hsl(340, 100%, 75%));
+    --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%), hsl(330, 100%, 98%));
+    --shadow-elegant: 0 10px 30px -10px hsl(340 82% 67% / 0.2);
+    --shadow-card: 0 4px 16px hsl(340 82% 67% / 0.1);
+    --shadow-glow: 0 0 40px hsl(340 100% 75% / 0.3);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    /* GiftGuru Dark Theme - Deep Purples */
+    --background: 270 50% 10%;
+    --foreground: 280 20% 95%;
+
+    --card: 270 40% 15%;
+    --card-foreground: 280 20% 95%;
+
+    --popover: 270 40% 15%;
+    --popover-foreground: 280 20% 95%;
+
+    --primary: 270 70% 65%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 280 80% 75%;
+
+    --secondary: 270 30% 20%;
+    --secondary-foreground: 280 20% 95%;
+
+    --muted: 270 30% 20%;
+    --muted-foreground: 270 20% 65%;
+
+    --accent: 280 75% 70%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 270 30% 25%;
+    --input: 270 30% 25%;
+    --ring: 270 70% 65%;
+
+    /* Custom GiftGuru dark tokens */
+    --gradient-hero: linear-gradient(135deg, hsl(270, 70%, 65%), hsl(280, 80%, 75%));
+    --gradient-card: linear-gradient(180deg, hsl(270, 40%, 15%), hsl(270, 50%, 18%));
+    --shadow-elegant: 0 10px 30px -10px hsl(270 70% 65% / 0.3);
+    --shadow-card: 0 4px 16px hsl(270 70% 65% / 0.15);
+    --shadow-glow: 0 0 40px hsl(280 80% 75% / 0.2);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: var(--theme-transition-duration, 200ms);
+  }
+
+  html {
+    transition: background-color 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .shadow-elegant {
+    box-shadow: var(--shadow-elegant);
+  }
+  
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+  
+  .bg-gradient-radial {
+    background-image: radial-gradient(circle at center, var(--tw-gradient-stops));
+  }
+  
+  .bg-noise {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  }
+  
+  /* Button hover effects */
+  .btn-hover-lift {
+    @apply transition-all duration-300 ease-out;
+    @apply hover:scale-105 hover:-translate-y-0.5 hover:shadow-elegant;
+    @apply active:scale-95 active:translate-y-0;
+  }
+  
+  .btn-hover-glow {
+    @apply transition-all duration-300;
+    @apply hover:shadow-glow hover:brightness-110;
+    @apply active:brightness-95;
+  }
+  
+  .btn-hover-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .btn-hover-shine::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    transition: left 0.5s ease;
+  }
+  
+  .btn-hover-shine:hover::before {
+    left: 100%;
+  }
+}
+
+/* Premium Theme Transition Effects */
+@layer base {
+  /* Smooth color transitions for all elements during theme change */
+  * {
+    transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: var(--theme-transition-duration, 200ms);
+  }
+
+  /* Faster transitions for certain elements */
+  button, a, input, select, textarea {
+    transition-duration: calc(var(--theme-transition-duration, 200ms) * 0.5);
+  }
+
+  /* Preserve animations during theme transition */
+  .animate-float-slow,
+  .animate-float-medium,
+  .animate-float-fast {
+    transition-property: background-color, opacity;
+    transition-duration: var(--theme-transition-duration, 200ms);
+  }
+}
+
+/* Theme transition overlay styles */
+.theme-transition-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+
+.theme-transition-overlay.active {
+  opacity: 1;
+}
+
+/* Smooth backdrop blur transition */
+.backdrop-blur-md {
+  transition: backdrop-filter 0.3s ease-out;
+}
+
+/* Card and surface transitions */
+.shadow-elegant,
+.shadow-card,
+.shadow-glow {
+  transition: box-shadow var(--theme-transition-duration, 200ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Gradient transitions */
+[class*="bg-gradient"],
+[class*="from-"],
+[class*="to-"],
+[class*="via-"] {
+  transition: all var(--theme-transition-duration, 200ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
