@@ -52,9 +52,19 @@ const Index = ({ session }: IndexProps) => {
 
     const loadSearchHistory = async () => {
     try {
+      // ensure we have an authenticated session and user id
+      const sessionResp = await supabase.auth.getSession();
+      const session = sessionResp?.data?.session;
+      if (!session) {
+        setSearchHistory([]);
+        return;
+      }
+      const userId = session.user.id;
+
       const { data, error } = await supabase
         .from('search_history')
         .select('*')
+        .eq('user_id', userId) // only this user's history
         .order('created_at', { ascending: false })
         .limit(10);
 
@@ -64,7 +74,6 @@ const Index = ({ session }: IndexProps) => {
         return;
       }
 
-      // data can be null; ensure array
       setSearchHistory(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error loading search history:', error);
@@ -77,9 +86,20 @@ const Index = ({ session }: IndexProps) => {
     if (!Array.isArray(results) || results.length === 0) return;
 
     try {
+      // ensure we have an authenticated session
+      const sessionResp = await supabase.auth.getSession();
+      const session = sessionResp?.data?.session;
+      if (!session) {
+        // not authenticated — do not save
+        console.warn("Attempted to save search without session");
+        return;
+      }
+      const userId = session.user.id;
+
       const { data, error } = await supabase
         .from('search_history')
         .insert({
+          user_id: userId, // <--- IMPORTANT: attach owner
           name: formData.name,
           age: formData.age,
           relation: formData.relation,
@@ -111,7 +131,6 @@ const Index = ({ session }: IndexProps) => {
     }
   };
 
-
   const loadSearch = (item: SearchHistoryRow) => {
     setFormData({
       name: item.name || "",
@@ -139,10 +158,15 @@ const Index = ({ session }: IndexProps) => {
 
   const deleteSearch = async (id: string) => {
     try {
+      const sessionResp = await supabase.auth.getSession();
+      const session = sessionResp?.data?.session;
+      if (!session) throw new Error("Not authenticated");
+      const userId = session.user.id;
+
       const { error } = await supabase
         .from('search_history')
         .delete()
-        .eq('id', id);
+        .match({ id, user_id: userId }); // only delete if owned by user
 
       if (error) throw error;
       
@@ -151,11 +175,11 @@ const Index = ({ session }: IndexProps) => {
         title: "Search deleted",
         description: "Search history item removed.",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting search:', error);
       toast({
         title: "Error",
-        description: "Failed to delete search history.",
+        description: error?.message || "Failed to delete search history.",
         variant: "destructive",
       });
     }

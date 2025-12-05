@@ -1,3 +1,4 @@
+// REPLACE ENTIRE FILE WITH THIS
 // src/pages/MyGifts.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -25,17 +26,18 @@ const MyGifts = () => {
   const loadGifts = async (): Promise<void> => {
     setLoading(true);
     try {
-      // get session safely
+      // fetch session safely
       const sessionResp = await supabase.auth.getSession();
       const session = sessionResp?.data?.session;
       if (!session) {
+        // not authenticated — redirect to home/login
         navigate("/");
         return;
       }
 
       const userId = session.user.id;
 
-      // Use a relaxed-typed supabase client for the "favorites" table which may not be in generated types
+      // Use a relaxed-typed supabase client to avoid generated types mismatch for "favorites"
       const sb: any = supabase as any;
 
       // 1) fetch favorite gift ids for this user
@@ -44,34 +46,42 @@ const MyGifts = () => {
         .select("gift_id")
         .eq("user_id", userId);
 
-      if (favResp?.error) throw favResp.error;
+      if (favResp?.error) {
+        console.error("Error fetching favorites:", favResp.error);
+        throw favResp.error;
+      }
 
-      const favData: any[] = favResp?.data ?? [];
-      const giftIds = favData.map((r: any) => r.gift_id) as string[];
+      const favData: any[] = Array.isArray(favResp?.data) ? favResp.data : [];
+      const giftIds = favData.map((r: any) => r.gift_id).filter(Boolean) as string[];
 
       if (!giftIds || giftIds.length === 0) {
+        // no favorites — clear list
         setGifts([]);
         return;
       }
 
-      // 2) fetch gifts with those ids (gifts is in your generated types)
-      const giftsResp: any = await supabase
+      // 2) fetch gifts with those ids
+      // Use sb for this request as well if your generated "gifts" types are causing issues.
+      const giftsResp: any = await sb
         .from("gifts")
         .select("*")
         .in("id", giftIds)
         .order("created_at", { ascending: false });
 
-      if (giftsResp?.error) throw giftsResp.error;
+      if (giftsResp?.error) {
+        console.error("Error fetching gifts by ids:", giftsResp.error);
+        throw giftsResp.error;
+      }
 
-      const giftsData: any[] = giftsResp?.data ?? [];
+      const giftsData: any[] = Array.isArray(giftsResp?.data) ? giftsResp.data : [];
 
-      const transformedGifts: Gift[] = (giftsData || []).map((gift: any) => ({
+      const transformedGifts: Gift[] = giftsData.map((gift: any) => ({
         id: gift.id,
         title: gift.title,
         description: gift.description,
-        price_min: gift.price_min,
-        price_max: gift.price_max,
-        match_score: gift.match_score,
+        price_min: gift.price_min ?? 0,
+        price_max: gift.price_max ?? gift.price_min ?? 0,
+        match_score: gift.match_score ?? 0,
         matched_tags: gift.matched_tags ?? [],
         ai_rationale: gift.ai_rationale ?? "",
         delivery_estimate: gift.delivery_estimate ?? "",
