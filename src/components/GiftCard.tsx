@@ -1,3 +1,4 @@
+// REPLACEMENT: src/components/GiftCard.tsx
 import { Gift } from "@/types/gift";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 import { buildGiftShareUrl, copyToClipboard } from "@/utils/shareUrl";
+import { toggleFavoriteForUser } from "@/lib/favorites"; // <-- new helper
 
 interface GiftCardProps {
   gift: Gift;
@@ -14,8 +16,11 @@ interface GiftCardProps {
 }
 
 export const GiftCard = ({ gift, index }: GiftCardProps) => {
-  const [saved, setSaved] = useState(false);
   const { toast } = useToast();
+
+  // Use runtime-derived favorited flag (may be undefined). Initialize accordingly.
+  const [isFavorited, setIsFavorited] = useState<boolean>(!!gift.favorited);
+  const [saving, setSaving] = useState(false);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -42,12 +47,40 @@ export const GiftCard = ({ gift, index }: GiftCardProps) => {
     }
   };
 
-  const toggleSave = () => {
-    setSaved(!saved);
-    toast({
-      title: saved ? "Removed from saved" : "Saved!",
-      description: saved ? "Gift removed from your list" : "Gift saved for later",
-    });
+  const onToggleFavorite = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();   // prevent Link navigation if inside Link
+      e.stopPropagation();  // stop outer click handlers
+    }
+    if (saving) return;
+    setSaving(true);
+
+    const prev = isFavorited;
+    // optimistic UI
+    setIsFavorited(!prev);
+
+    try {
+      const newState = await toggleFavoriteForUser(gift.id, prev);
+      setIsFavorited(newState);
+      toast({
+        title: newState ? "Saved!" : "Removed",
+        description: newState ? "Gift saved to favorites." : "Gift removed from favorites.",
+      });
+    } catch (err: any) {
+      console.error("Failed to toggle favorite", err);
+      // revert optimistic update
+      setIsFavorited(prev);
+
+      // If the helper throws a not-authenticated error you can redirect to login here.
+      // e.g. if (err.message.includes('Not authenticated')) navigate('/auth');
+      toast({
+        title: "Could not update favorite",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -73,15 +106,18 @@ export const GiftCard = ({ gift, index }: GiftCardProps) => {
             <div className="absolute top-2 right-2 bg-primary text-primary-foreground px-2 py-1 rounded-full text-xs font-bold shadow-lg">
               {Math.round(gift.match_score * 100)}% Match
             </div>
+
+            {/* Favorite button (stops Link navigation & does DB toggle) */}
             <button
-              onClick={(e) => {
-                e.preventDefault();
-                toggleSave();
-              }}
-              className="absolute top-2 left-2 p-2 bg-background/80 backdrop-blur-sm rounded-full hover:bg-background transition-colors shadow-lg"
-              aria-label={saved ? "Remove from saved" : "Save for later"}
+              onClick={onToggleFavorite}
+              className={`absolute top-2 left-2 p-2 bg-background/80 backdrop-blur-sm rounded-full transition-colors shadow-lg focus:outline-none ${saving ? 'opacity-60 pointer-events-none' : 'hover:bg-background'}`}
+              aria-label={isFavorited ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={isFavorited}
+              title={isFavorited ? "Remove from favorites" : "Add to favorites"}
+              disabled={saving}
             >
-              <Heart className={`h-4 w-4 ${saved ? 'fill-primary text-primary' : 'text-muted-foreground'}`} />
+              {/* using same Heart icon — style it to look 'filled' when favorited */}
+              <Heart className={`h-4 w-4 ${isFavorited ? 'text-primary fill-primary' : 'text-muted-foreground'}`} />
             </button>
           </div>
         </Link>

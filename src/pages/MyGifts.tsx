@@ -1,3 +1,4 @@
+// src/pages/MyGifts.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -18,48 +19,78 @@ const MyGifts = () => {
 
   useEffect(() => {
     loadGifts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadGifts = async () => {
+  const loadGifts = async (): Promise<void> => {
+    setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
+      // get session safely
+      const sessionResp = await supabase.auth.getSession();
+      const session = sessionResp?.data?.session;
       if (!session) {
         navigate("/");
         return;
       }
 
-      const { data, error } = await supabase
-        .from('gifts')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const userId = session.user.id;
 
-      if (error) throw error;
+      // Use a relaxed-typed supabase client for the "favorites" table which may not be in generated types
+      const sb: any = supabase as any;
 
-      // Transform database gifts to match Gift interface
-      const transformedGifts: Gift[] = (data || []).map((gift) => ({
+      // 1) fetch favorite gift ids for this user
+      const favResp: any = await sb
+        .from("favorites")
+        .select("gift_id")
+        .eq("user_id", userId);
+
+      if (favResp?.error) throw favResp.error;
+
+      const favData: any[] = favResp?.data ?? [];
+      const giftIds = favData.map((r: any) => r.gift_id) as string[];
+
+      if (!giftIds || giftIds.length === 0) {
+        setGifts([]);
+        return;
+      }
+
+      // 2) fetch gifts with those ids (gifts is in your generated types)
+      const giftsResp: any = await supabase
+        .from("gifts")
+        .select("*")
+        .in("id", giftIds)
+        .order("created_at", { ascending: false });
+
+      if (giftsResp?.error) throw giftsResp.error;
+
+      const giftsData: any[] = giftsResp?.data ?? [];
+
+      const transformedGifts: Gift[] = (giftsData || []).map((gift: any) => ({
         id: gift.id,
         title: gift.title,
         description: gift.description,
         price_min: gift.price_min,
         price_max: gift.price_max,
         match_score: gift.match_score,
-        matched_tags: gift.matched_tags,
-        ai_rationale: gift.ai_rationale,
-        delivery_estimate: gift.delivery_estimate,
-        vendor: gift.vendor,
+        matched_tags: gift.matched_tags ?? [],
+        ai_rationale: gift.ai_rationale ?? "",
+        delivery_estimate: gift.delivery_estimate ?? "",
+        vendor: gift.vendor ?? "",
         images: gift.images as any,
-        buy_link: gift.buy_link,
+        buy_link: gift.buy_link ?? "",
+        // runtime flag derived from favorites
+        favorited: true,
       }));
 
       setGifts(transformedGifts);
-    } catch (error) {
-      console.error('Error loading gifts:', error);
+    } catch (error: any) {
+      console.error("Error loading favorites:", error);
       toast({
         title: "Error",
-        description: "Failed to load your gifts. Please try again.",
+        description: "Failed to load your favorite gifts. Please try again.",
         variant: "destructive",
       });
+      setGifts([]);
     } finally {
       setLoading(false);
     }
@@ -87,9 +118,7 @@ const MyGifts = () => {
             </div>
             <div>
               <h1 className="text-4xl font-bold text-foreground">My Gifts</h1>
-              <p className="text-muted-foreground">
-                All your personalized gift recommendations
-              </p>
+              <p className="text-muted-foreground">All your personalized gift recommendations</p>
             </div>
           </div>
         </div>
@@ -116,13 +145,8 @@ const MyGifts = () => {
               <Sparkles className="h-12 w-12 text-muted-foreground" />
             </div>
             <h2 className="text-2xl font-bold mb-2 text-foreground">No gifts yet</h2>
-            <p className="text-muted-foreground mb-6">
-              Start by creating your first gift search
-            </p>
-            <Button
-              onClick={() => navigate("/search")}
-              className="bg-primary hover:bg-primary/90 btn-hover-lift"
-            >
+            <p className="text-muted-foreground mb-6">Start by creating your first gift search</p>
+            <Button onClick={() => navigate("/search")} className="bg-primary hover:bg-primary/90 btn-hover-lift">
               <Sparkles className="mr-2 h-4 w-4" />
               Find Gifts
             </Button>

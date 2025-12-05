@@ -18,6 +18,7 @@ export interface Gift {
   delivery_estimate: string;
   buy_link: string;
   vendor: string;
+  favorited?: boolean;
 }
 
 export interface GiftRequest {
