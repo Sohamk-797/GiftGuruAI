@@ -347,61 +347,121 @@ Return ONLY a valid JSON array of ${isFirstBatch ? '9' : '6'} gifts with this st
     const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
 
   // Build a helper to send Gemini requests (allows retries with different generationConfig)
-async function sendGeminiRequest(generationConfig: any) {
-  const body = {
-    contents: [
-      {
-        role: 'model',
-        parts: [
-          {
-            text:
-              'You are an expert Indian gift curator with deep knowledge of Indian culture, occasions, and gift-giving traditions. You provide personalized, thoughtful gift recommendations.',
-          },
-        ],
-      },
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ],
-    generationConfig,
-  };
-
-  // Log a compact, non-sensitive preview of request shape
-  try {
-    console.log('Gemini request preview:', {
-      contents_count: Array.isArray(body.contents) ? body.contents.length : 0,
+  // Find code and replace with:
+  async function sendGeminiRequest(generationConfig: any) {
+    const body = {
+      contents: [
+        {
+          role: 'model',
+          parts: [
+            {
+              text:
+                'You are an expert Indian gift curator with deep knowledge of Indian culture, occasions, and gift-giving traditions. You provide personalized, thoughtful gift recommendations.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          parts: [{ text: prompt }],
+        },
+      ],
       generationConfig,
-    });
-  } catch (e) {}
+    };
 
-  const resp = await fetchWithRetry(geminiEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': AI_API_KEY,
-    },
-    body: JSON.stringify(body),
-  }, 2, 400);
+    // Basic request preview log (non-sensitive)
+    try {
+      console.log('Gemini request preview:', {
+        contents_count: Array.isArray(body.contents) ? body.contents.length : 0,
+        generationConfig,
+      });
+    } catch (e) {}
 
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    console.error('Gemini API error:', resp.status, errText.slice(0, 2000));
-    throw new Error(`AI API error: ${resp.status} ${errText}`);
+    // Retry strategy for transient errors (429, 503)
+    const maxAttempts = 4;
+    const baseMs = 400; // initial backoff
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const resp = await fetchWithRetry(geminiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': AI_API_KEY,
+          },
+          body: JSON.stringify(body),
+        }, 1, 200); // fetchWithRetry will retry once per call (keeps this quick)
+
+        // If non-ok, capture text for diagnostics.
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          console.error(`Gemini API error (attempt ${attempt + 1}):`, resp.status, errText.slice(0, 2000));
+
+          // If the error is transient (rate-limited/overloaded), retry with backoff + jitter.
+          if (resp.status === 429 || resp.status === 503) {
+            // If last attempt, throw enriched error
+            if (attempt === maxAttempts - 1) {
+              const e: any = new Error(`AI API error: ${resp.status}`);
+              e.code = 'ai_api_unavailable';
+              e.status = resp.status;
+              e.details = errText.slice(0, 2000);
+              throw e;
+            }
+            // backoff with jitter
+            const jitter = Math.floor(Math.random() * 200);
+            const wait = baseMs * Math.pow(2, attempt) + jitter;
+            console.warn(`Transient Gemini error ${resp.status}. retrying in ${wait}ms (attempt ${attempt + 1}/${maxAttempts})`);
+            await new Promise(r => setTimeout(r, wait));
+            continue;
+          } else {
+            // Non-retryable HTTP error — attach details and throw
+            const e: any = new Error(`AI API error: ${resp.status}`);
+            e.code = 'ai_api_error';
+            e.status = resp.status;
+            e.details = errText.slice(0, 2000);
+            throw e;
+          }
+        }
+
+        // Try to parse JSON response
+        let parsed: any = null;
+        try {
+          parsed = await resp.json();
+        } catch (err) {
+          const rawText = await resp.text().catch(() => '');
+          console.error('Failed to parse Gemini response JSON:', err, 'raw (truncated):', rawText.slice(0,2000));
+          const e: any = new Error('Failed to parse AI response JSON.');
+          e.code = 'ai_parse_error';
+          e.details = rawText.slice(0, 2000);
+          throw e;
+        }
+
+        // Got parsed response — return it
+        return parsed;
+
+      } catch (err) {
+        // If this was our explicitly thrown ai_api_unavailable or ai_parse_error, bubble it up
+        if ((err as any)?.code && ['ai_api_unavailable','ai_api_error','ai_parse_error'].includes((err as any).code)) {
+          throw err;
+        }
+        // For other runtime/network errors, decide whether to retry
+        if (attempt === maxAttempts - 1) {
+          const e: any = new Error('AI request failed after retries.');
+          e.code = (err as any)?.code || 'ai_request_failed';
+          e.details = (err as any)?.message || String(err);
+          throw e;
+        }
+        const jitter = Math.floor(Math.random() * 200);
+        const wait = baseMs * Math.pow(2, attempt) + jitter;
+        console.warn(`Network/Fetch error to Gemini (attempt ${attempt + 1}). Retrying in ${wait}ms.`, err);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+    }
+
+    // Defensive fallback (should not reach here)
+    const e: any = new Error('AI request failed (fatal).');
+    e.code = 'ai_request_failed_fatal';
+    throw e;
   }
-
-  // Try to parse JSON; if parse fails return both parsed (if any) and raw text
-  let parsed: any = null;
-  let rawText = '';
-  try {
-    parsed = await resp.json();
-  } catch (err) {
-    try { rawText = await resp.text(); } catch (e) { rawText = ''; }
-    console.error('Failed to parse Gemini response JSON:', err, 'raw (truncated):', rawText.slice(0,2000));
-    throw new Error('Failed to parse AI response JSON. See logs for raw output.');
-  }
-  return parsed;
-}
 
 // Primary attempt: generous token allowance but conservative start
 let geminiData: any = null;
@@ -646,10 +706,17 @@ let giftsText: string | null = null;
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
+  // Find code and replace with:
   } catch (error) {
-    console.error('Error in suggest-gifts function:', error);
-    // Ensure we return CORS headers on error as well
-        // Reuse the same dynamic origin resolution used earlier:
+    // Detailed logging for debugging
+    console.error('Error in suggest-gifts function:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      code: (error as any)?.code,
+      details: (error as any)?.details,
+    });
+
+    // Resolve allowed origin like earlier
     const envAllowed = (Deno.env.get('FRONTEND_ALLOWED_ORIGINS') || Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080');
     const allowedOrigins = envAllowed
       .split(',')
@@ -658,18 +725,27 @@ let giftsText: string | null = null;
     const requestOrigin = (req.headers.get('origin') || '').toLowerCase();
     const responseOrigin = requestOrigin && allowedOrigins.some((a: string) => a.toLowerCase() === requestOrigin) ? requestOrigin : (allowedOrigins[0] || null);
 
-
     const errorCorsHeaders: Record<string, string> = responseOrigin
       ? { 'Access-Control-Allow-Origin': responseOrigin, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' }
       : { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' };
 
-    return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Unknown error',
+    // Build structured error response
+    const code = (error as any)?.code || 'internal_error';
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const details = (error as any)?.details;
+
+    const respBody: any = {
+      error: {
+        code,
+        message,
+      },
       gifts: []
-    }), {
+    };
+    if (details) respBody.error.details = details;
+
+    return new Response(JSON.stringify(respBody), {
       status: 500,
       headers: { ...errorCorsHeaders, 'Content-Type': 'application/json' }
     });
-
   }
 });

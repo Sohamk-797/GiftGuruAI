@@ -244,13 +244,32 @@ const Index = ({ session }: IndexProps) => {
           description: "No exact matches found — we returned alternatives.",
         });
       }
-    } catch (error: any) {
+        } catch (error: any) {
       console.error('Error getting suggestions:', error);
-      // Provide more actionable message when server includes details
-      const message =
-        error?.message && typeof error.message === 'string'
-          ? error.message
-          : (error?.status ? `Server Error: ${error.status}` : 'Failed to get gift suggestions. Please try again.');
+
+      // Prefer server-provided structured error message when available.
+      let message = 'Failed to get gift suggestions. Please try again.';
+      try {
+        // Supabase SDK sometimes puts server response in error.data or error.message
+        if (error?.data) {
+          const serverData = typeof error.data === 'string' ? (() => { try { return JSON.parse(error.data); } catch { return null; } })() : error.data;
+          if (serverData?.error?.message) {
+            message = serverData.error.message;
+            if (serverData.error.details) message += ` — ${serverData.error.details}`;
+          } else if (serverData?.error) {
+            message = typeof serverData.error === 'string' ? serverData.error : JSON.stringify(serverData.error);
+          } else if (serverData?.message) {
+            message = serverData.message;
+          }
+        } else if (error?.message && typeof error.message === 'string') {
+          message = error.message;
+        } else if (error?.status) {
+          message = `Server Error: ${error.status}`;
+        }
+      } catch (e) {
+        // fallback
+        message = error?.message || message;
+      }
 
       toast({
         title: "Error",
