@@ -186,18 +186,47 @@ async function validateAuthToken(authHeader: string | null, supabaseUrl: string,
 // Main handler: read secrets inside handler, lazy-load supabase client, run AI & DB logic
 serve(async (req: Request) => {
   // Build CORS headers dynamically from env (or fallback)
-  const FRONTEND_ORIGIN = Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080';
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': FRONTEND_ORIGIN,
+    // Build CORS response by echoing request Origin when allowed.
+  // Allowed origins come from environment variable FRONTEND_ALLOWED_ORIGINS (CSV) or VITE_FRONTEND_BASE_URL for backward compatibility.
+  const envAllowed = (Deno.env.get('FRONTEND_ALLOWED_ORIGINS') || Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080');
+    const allowedOrigins = envAllowed
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+
+  const requestOrigin = (req.headers.get('origin') || '').toLowerCase();
+
+  // Decide response origin header: echo the request origin if allowed; otherwise fall back to first allowed origin or null.
+  let responseOrigin: string | null = null;
+  if (requestOrigin && allowedOrigins.some((a: string) => a.toLowerCase() === requestOrigin)) {
+    responseOrigin = requestOrigin;
+  } else if (allowedOrigins.length > 0) {
+
+    // If you want stricter behavior, you can set responseOrigin = null to reject cross-origin requests.
+    responseOrigin = allowedOrigins[0]; // fallback for back-compat
+  }
+
+  const corsHeadersBase: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Credentials': 'true',
   };
 
+  // Build final CORS headers object (only include Access-Control-Allow-Origin if we have a value)
+  const corsHeaders: Record<string, string> = responseOrigin
+    ? { 'Access-Control-Allow-Origin': responseOrigin, ...corsHeadersBase }
+    : { ...corsHeadersBase };
+
+  // OPTIONS preflight: respond with the resolved origin header so browser accepts it
   if (req.method === 'OPTIONS') {
-    // Preflight response
+    // If responseOrigin is null, respond 403 to preflight to make the problem explicit in logs.
+    if (!responseOrigin) {
+      console.warn('CORS preflight blocked. Request origin not allowed:', requestOrigin, 'Allowed:', allowedOrigins);
+      return new Response(null, { status: 403, headers: corsHeaders });
+    }
     return new Response(null, { status: 204, headers: corsHeaders });
   }
+
 
   try {
     let requestData: GiftRequest;
@@ -620,19 +649,27 @@ let giftsText: string | null = null;
   } catch (error) {
     console.error('Error in suggest-gifts function:', error);
     // Ensure we return CORS headers on error as well
-    const FRONTEND_ORIGIN = Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080';
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': FRONTEND_ORIGIN,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-      'Access-Control-Allow-Credentials': 'true',
-    };
+        // Reuse the same dynamic origin resolution used earlier:
+    const envAllowed = (Deno.env.get('FRONTEND_ALLOWED_ORIGINS') || Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080');
+    const allowedOrigins = envAllowed
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    const requestOrigin = (req.headers.get('origin') || '').toLowerCase();
+    const responseOrigin = requestOrigin && allowedOrigins.some((a: string) => a.toLowerCase() === requestOrigin) ? requestOrigin : (allowedOrigins[0] || null);
+
+
+    const errorCorsHeaders: Record<string, string> = responseOrigin
+      ? { 'Access-Control-Allow-Origin': responseOrigin, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' }
+      : { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' };
+
     return new Response(JSON.stringify({
       error: error instanceof Error ? error.message : 'Unknown error',
       gifts: []
     }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: { ...errorCorsHeaders, 'Content-Type': 'application/json' }
     });
+
   }
 });
