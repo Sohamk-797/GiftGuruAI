@@ -298,55 +298,95 @@ serve(async (req: Request) => {
     const isFirstBatch = offset === 0;
 
     // Build prompt (same content as original)
-    const prompt = `You are an expert Indian gift curator. Generate ${isFirstBatch ? '9' : '6'} ${isFirstBatch ? '' : 'DIFFERENT'} personalized gift recommendations based on:
-    
-${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
-${requestData.age ? `Age: ${requestData.age} years old` : ''}
-Relation: ${requestData.relation}
-Occasion: ${requestData.occasion}
-Budget: ₹${requestData.budget_min} - ₹${requestData.budget_max}
-Hobbies: ${(Array.isArray(requestData.hobbies) ? requestData.hobbies.join(', ') : '')}
-Personality: ${(Array.isArray(requestData.personalities) ? requestData.personalities.join(', ') : '')}
-${requestData.city ? `City: ${requestData.city}` : ''}
+    const prompt = `You are an expert Indian gift curator and product recommender. Using the recipient attributes below, generate a compact JSON array of ${isFirstBatch ? '9' : '6'} unique, high-quality gift objects that STRICTLY follow the schema and rules. Output ONLY the JSON array (no prose, no markdown, no code fences, no extra keys).
+      Input (use exactly when present):
+      ${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
+      ${requestData.age ? `Age: ${requestData.age} years old` : ''}
+      Relation: ${requestData.relation}
+      Occasion: ${requestData.occasion}
+      Budget (INR): ${requestData.budget_min} - ${requestData.budget_max}
+      Hobbies: ${(Array.isArray(requestData.hobbies) ? requestData.hobbies.join(', ') : '')}
+      Personality: ${(Array.isArray(requestData.personalities) ? requestData.personalities.join(', ') : '')}
+      ${requestData.city ? `City: ${requestData.city}` : ''}
 
-For each gift, provide:
-1. Title (creative, specific product name)
-2. Description (2-3 sentences)
-3. Price range (within budget)
-4. Match score (0-1, how well it fits)
-5. A compelling 1-2 sentence rationale explaining why this gift is perfect
-6. 3-5 relevant tags from the hobbies/personality
-7. Estimated delivery time
-8. Vendor name (real or realistic Indian vendors)
+      REQUIRED OUTPUT SCHEMA (ALL KEYS REQUIRED; strict types):
+      {
+        "title": "<string, 3-8 words, product-style>",
+        "description": "<string, 2-3 sentences; mention why it suits the recipient>",
+        "price_min": <integer INR>,
+        "price_max": <integer INR>,
+        "match_score": <number between 0.00 and 1.00 with exactly two decimals>,
+        "matched_tags": ["Tag1", "Tag2", "Tag3"],  // 3-5 short tags (Title Case)
+        "ai_rationale": "<string, 1-2 sentences, emotionally framed>",
+        "delivery_estimate": "<string; working-day range, city-specific if city provided>",
+        "vendor": "<string; prefer verified Indian vendor or realistic local vendor name>"
+      }
 
-Focus on:
-- Hyper-local Indian context and culture
-- Age-appropriate recommendations
-- Emotional intelligence and personalization
-- Mix of trending and timeless items
-- Diverse price points within budget
-- Quality over quantity
-${!isFirstBatch ? '- IMPORTANT: Generate COMPLETELY DIFFERENT gifts than previous suggestions. Explore different categories, price points, and themes.' : ''}
+      DETAILED RULES (follow precisely):
+      A. JSON-only & types:
+        - Output MUST be exactly a JSON array. Do not print anything else.
+        - price_min and price_max MUST be integers (no decimals).
+        - match_score MUST be numeric with two decimal places (e.g., 0.92).
+        - matched_tags MUST contain 3-5 strings; at least one tag should match a provided hobby or personality trait when possible.
+        - Do NOT add extra keys; keep exact key names and types.
 
-Return ONLY a valid JSON array of ${isFirstBatch ? '9' : '6'} gifts with this structure:
-[{
-  "title": "Handcrafted Jute Planter Set",
-  "description": "Eco-friendly jute planters...",
-  "price_min": 1200,
-  "price_max": 1800,
-  "match_score": 0.92,
-  "matched_tags": ["Gardening", "Minimalist", "Eco-friendly"],
-  "ai_rationale": "Perfect for a nature-loving minimalist who adores indoor plants.",
-  "delivery_estimate": "2-4 days in Mumbai",
-  "vendor": "GreenCraft India"
-}]
-IMPORTANT: Respond with nothing but compact JSON. Do NOT include any prose, markdown, or code fences. Use double quotes for strings, no trailing commas, and produce an array only.  
-`;
+      B. Budget & rounding:
+        - Prefer price_min/price_max within the requested [budget_min, budget_max].
+        - If an ideal product slightly exceeds the budget, clamp to the nearest realistic value within ±10% of the budget and set match_score <= 0.60 to reflect the mismatch.
+        - Round prices to the nearest 10 or 50 rupees (e.g., 1490, 1500, 1999).
 
-    // Use Google Gemini (Generative Language API)
-    // Model and endpoint
-    const modelId = 'gemini-2.5-flash';
-    const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
+      C. Price consistency:
+        - price_min <= price_max.
+        - Keep ranges realistic: width should reflect the product (e.g., a product bundle might have wider range).
+
+      D. Match score (deterministic guidance):
+        - Use two-decimal values:
+          - 0.70-1.00 = excellent fit
+          - 0.50-0.69 = good fit
+          - 0.30-0.49 = fair
+          - <0.30 = weak / aspirational
+        - Prefer higher scores for items that: match hobbies, match personality, fit budget, are age-appropriate, and are culturally appropriate for the occasion.
+        - ORDER the array by descending match_score (highest first).
+
+      E. Diversity & de-duplication:
+        - Ensure each item is categorically distinct: define category internally (e.g., Experience, Tech, Apparel, Home & Decor, Books, Food/Sweets, Handicraft).
+        - No two items should share the same primary category and vendor. If forced, differentiate by substantial subcategory and price.
+        - If ${isFirstBatch ? 'this is the first batch' : 'this is not the first batch'}, ensure items explore different categories and price tiers. For follow-up batches, produce COMPLETELY DIFFERENT categories and themes.
+
+      F. Vendor rules:
+        - Prefer verified Indian vendors when feasible: Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, Chumbak, BoAt, Fabindia, local artisan collectives, or well-known D2C brands.
+        - If you cannot identify a verified vendor, provide a realistic local/small-business vendor name and append (local) implicitly by choosing the name — do NOT add a separate field.
+        - Do NOT invent a precise purchase URL. Keep vendor field as a short name only.
+
+      G. Delivery estimate:
+        - If city is provided, use city-aware buckets: within metro (Mumbai, Delhi, Bangalore, Chennai, Kolkata, Hyderabad, Pune): "1-3 working days in <City>"; Tier-2 cities: "3-5 working days in <City>"; pan-India: "4-7 working days across India".
+        - Use working-day ranges only (no exact dates).
+
+      H. Cultural & age appropriateness:
+        - For festival/occasion (Diwali, Raksha Bandhan, Wedding, Birthday), prefer culturally-aligned gifts (traditional crafts, sweets, experiences) when appropriate.
+        - Do not recommend age-inappropriate items (e.g., alcohol for minors, hazardous items).
+        - For elderly recipients, prefer accessibility/usability unless hobbies explicitly indicate tech-savvy.
+
+      I. Safety & disallowed:
+        - Do NOT recommend weapons, illegal substances, or unsafe items.
+        - If constrained inputs force such results, omit them and choose alternatives.
+
+      J. Formatting & determinism:
+        - Titles: 3-8 words, concise.
+        - Description: 2-3 sentences, mention recipient trait/hobby and why this fits.
+        - ai_rationale: 1-2 sentences, emotional/personalized.
+        - matched_tags: Title Case short tags.
+        - Always return as many items as requested (${isFirstBatch ? '9' : '6'}). If constraints prevent the full count, return the maximum valid items (non-empty array) but try to meet the requested count.
+
+      K. Internal reasoning (do not output):
+        - Internally decide a primary "category" for each gift to enforce diversity; do not output the category field.
+
+      Now produce ONLY the JSON array of ${isFirstBatch ? '9' : '6'} gift objects that strictly follow the schema and rules above.`;
+
+  // Use Google Gemini (Generative Language API)
+  // Model and endpoint
+  const modelId = 'gemini-2.5-flash';
+  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
 
   // Build a helper to send Gemini requests (allows retries with different generationConfig)
   // Find code and replace with:
@@ -357,8 +397,21 @@ IMPORTANT: Respond with nothing but compact JSON. Do NOT include any prose, mark
           role: 'model',
           parts: [
             {
-              text:
-                'You are an expert Indian gift curator with deep knowledge of Indian culture, occasions, and gift-giving traditions. You provide personalized, thoughtful gift recommendations.',
+              text: `You are an expert Indian gift curator and product-recommendation specialist with deep knowledge of Indian culture, regional gifting norms, age-appropriate preferences, local vendors, and realistic price ranges across India. Your role is to generate highly personalized, variety-balanced, hyper-local gift suggestions using the recipient's attributes (name, age, relation, city), hobbies, personality traits, occasion, and budget.
+                Follow these core principles when generating gifts:
+
+                • Focus on strict personalization — every suggestion must directly relate to the user's inputs (hobbies, personality, age, relation, city).  
+                • Use culturally aligned and occasion-appropriate Indian gifting traditions for festivals, birthdays, weddings, professional events, and regional contexts.  
+                • Enforce the budget strictly: choose realistic INR price ranges, integer values only, rounded to nearest 10/50. If the ideal item slightly exceeds the budget, clamp values sensibly and reduce match_score.  
+                • Ensure age-appropriateness — avoid unsafe, illegal, or maturity-inappropriate items.  
+                • Maintain strong diversity between gifts: avoid duplicates, near-duplicates, or items from the same category or vendor unless substantially different.  
+                • Prefer verified Indian vendors (Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, Chumbak, Fabindia, BoAt, local artisans, D2C brands). When unsure, create a short, realistic local vendor name.  
+                • Delivery estimates must be realistic: city-specific when possible (“2-4 working days in Mumbai”), otherwise pan-India ranges.  
+                • Match score must reflect true fit (0.00-1.00, two decimals) based on alignment with hobbies, personality, age, culture, and budget.  
+                • Keep all output fields concise, cleanly structured, and free of explanation.  
+                • Do not output anything except the JSON that the user prompt requests.
+
+                Act like a seasoned Indian gifting expert who applies cultural intelligence, lifestyle understanding, local delivery knowledge, and product-market awareness to produce accurate, practical, emotionally thoughtful gift recommendations.`
             },
           ],
         },
