@@ -337,7 +337,7 @@ const Index = ({ session }: IndexProps) => {
               size="sm"
               className="btn-hover-lift bg-card/80 backdrop-blur-md border-border/50"
             >
-              Privacy
+              Privacy Policy
             </Button>
             <Button
               onClick={handleSignOut}
