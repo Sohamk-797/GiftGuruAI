@@ -310,11 +310,17 @@ Hobbies: ${(Array.isArray(requestData.hobbies) ? requestData.hobbies.join(', ') 
 Personality: ${(Array.isArray(requestData.personalities) ? requestData.personalities.join(', ') : '')}
 ${requestData.city ? `City: ${requestData.city}` : ''}
 
+CORE TAG HANDLING (MUST FOLLOW EXACTLY):
+- You MUST internally consider *every* hobby and *every* personality trait the user provided when reasoning about gifts. Treat the full list as evidence to influence category choice, scoring, and tag selection.
+- Per gift: output exactly 3(minimum) - 6(average) - maximum possible matched_tags (Title Case). These must be chosen from or logically derived from the user's full supplied list when possible.
+- Batch-level coverage: across the entire returned array of ${isFirstBatch ? '9' : '6'} gifts, attempt to cover as many distinct user-supplied hobbies/personality traits as reasonably possible. If the user supplied >8 tags, cluster similar tags and ensure each cluster is represented across different gifts.
+- Tag derivation: you may map a supplied tag to a close variant for clarity (e.g., "Gardening / Indoor Plants" → "Indoor Gardening"). Prefer direct matches when available.
+
 STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
 [
   {
     "title": "<string, 3-8 words, product-style>",
-    "description": "<string, 2-3 sentences; explain why this suits the recipient and reference at least one hobby/personality or occasion>",
+    "description": "<string, 2-3 sentences; explain why this suits the recipient and reference at least one hobby/personality or the occasion>",
     "price_min": <integer INR>,
     "price_max": <integer INR, >= price_min>,
     "match_score": <number between 0.00 and 1.00 with exactly two decimals>,
@@ -325,52 +331,39 @@ STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
   }, ...
 ]
 
-KEY RULES — MANDATORY (follow precisely)
-1) JSON-only: Output MUST be exactly a JSON array of ${isFirstBatch ? '9' : '6'} objects. No surrounding text, no explanations, no fences, no extra keys, no comments.  
-2) Exact count: Return EXACTLY ${isFirstBatch ? '9' : '6'} objects. The server will save them as-is.  
-3) Data types:
-   - price_min / price_max: integers in INR. No decimals.  
-   - match_score: numeric between 0.00 and 1.00 with exactly two decimals (e.g., 0.92).  
-   - matched_tags: array length 3-5, Title Case short tags (single words or short phrases).  
-4) Budget & rounding:
-   - Prefer price ranges fully within the provided [budget_min, budget_max].  
-   - If the ideal product slightly exceeds budget, clamp to the nearest realistic integer within ±10% and mark match_score <= 0.60.  
-   - Round prices to nearest 10 or 50 rupees (choose 50 for >₹2,000 ranges).  
-5) Price logic:
-   - Ensure price_min <= price_max.  
-   - Range width should be realistic (not absurdly narrow or wide).  
-6) Match score semantics (use these bands; two decimals):
+MANDATORY RULES (IMPLEMENT PRECISELY)
+1) JSON-only / exact count: Output MUST be exactly a JSON array of ${isFirstBatch ? '9' : '6'} objects. No surrounding text, no extra keys, no comments.  
+2) Types & formatting:
+   - price_min / price_max: integer INR (no decimals). Round to nearest 10 or 50 (50 for >₹2,000 ranges).  
+   - match_score: numeric, two decimals (0.00-1.00).  
+   - matched_tags: 3-5 tags, Title Case.  
+3) Budget enforcement:
+   - Prefer price ranges inside [budget_min, budget_max]. If an ideal product slightly exceeds budget, clamp to nearest realistic integer within ±10% and set match_score <= 0.60 to reflect mismatch.  
+4) Price sanity: price_min <= price_max; range widths should be realistic for item type.  
+5) Match score policy (two decimals):
    - 0.70-1.00 = excellent fit  
    - 0.50-0.69 = good fit  
-   - 0.30-0.49 = fair / backup or lower-confidence suggestion  
-   - <0.30 = aspirational / not recommended (avoid unless necessary)  
-   - Order final array by descending match_score (highest first).  
-7) Tags: At least one tag must directly match or closely map to a provided hobby or personality when possible. Use 3-5 tags per gift.  
-8) Diversity rule (deterministic):
-   - Each item must be from a distinct primary category (internally choose among: Tech, Home & Decor, Experience, Food/Sweets, Fashion/Accessory, Books, Handicraft/Artisan, Hobby Kit, Wellness, Subscription/Service).  
-   - No two gifts should share the same primary category + same vendor. If unavoidable, ensure substantial subcategory differences and different price tiers.  
-9) Padding behavior (model MUST implement):
-   - Primary attempt: list ${isFirstBatch ? '9' : '6'} high-quality, distinct items.  
-   - If you cannot identify enough high-quality distinct items, you MUST still return EXACTLY ${isFirstBatch ? '9' : '6'} objects by padding with deterministic fallback items derived from recipient inputs (use hobbies, personality, occasion to craft titles, tags, and rationale).  
-   - Padded items must be valid per schema and should have conservative match_score values (0.30-0.60, prefer 0.45-0.55). Do NOT add an explicit "fallback" flag.  
-10) Vendor rules:
-    - Prefer verified Indian vendors when appropriate: Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, FabIndia, BoAt, Chumbak, local artisan collectives, established D2C brands.  
-    - If no verified vendor fits, provide a realistic local/small-business vendor name (short), but do not invent URLs. Keep vendor field concise.  
-11) Delivery estimates:
-    - If city provided: metro buckets for Mumbai/Delhi/Bengaluru/Chennai/Hyderabad/Pune => "1-3 working days in <City>"; Tier-2 cities => "3-5 working days in <City>".  
-    - If city absent: "4-7 working days across India".  
-    - Use working-day ranges only.  
-12) Safety & age appropriateness:
-    - Do NOT recommend illegal, unsafe, or age-inappropriate items (e.g., alcohol for minors, weapons, hazardous items).  
-    - For elderly recipients prefer accessibility/usability unless hobbies indicate tech-savvy.  
-13) No extra keys: Strictly do not include any keys beyond the schema.  
-14) Determinism & formatting:
-    - Title length: 3-8 words, product-style (e.g., "Handcrafted Copper Tumbler").  
-    - Description: 2-3 sentences referencing recipient traits/hobbies/occasion.  
-    - ai_rationale: 1-2 emotionally-framed sentences (why this gift matters).  
-    - matched_tags: short, Title Case, reflect hobbies/personality.  
-    - Sort by match_score descending.  
-15) If constraints are impossible: still return as many valid items as possible up to ${isFirstBatch ? '9' : '6'}, but attempt to reach the full count via padding.
+   - 0.30-0.49 = fair / padded or weaker fit  
+   - <0.30 = aspirational (avoid unless necessary)  
+   - Sort array by descending match_score.  
+6) Tag constraints:
+   - Each gift must include at least one tag directly matching (or clearly derived from) the supplied hobbies/personality traits.  
+   - Across the whole batch, maximize coverage of distinct supplied tags/clusters.  
+7) Diversity:
+   - Ensure primary-category diversity among returned gifts (choose from Tech, Home & Decor, Experience, Food/Sweets, Fashion/Accessory, Books, Handicraft/Artisan, Hobby Kit, Wellness, Subscription/Service).  
+   - Avoid same (primary category + vendor) duplicates. If unavoidable, ensure substantial subcategory differences and different price tiers.  
+8) Padding requirement:
+   - If you cannot find enough high-quality distinct items, you MUST still return exactly ${isFirstBatch ? '9' : '6'} objects by padding with deterministic fallback items derived from the complete set of supplied tags. Padded items must be valid per schema and have conservative match_score (0.30-0.60; prefer 0.45-0.55). Do NOT add an explicit fallback flag.  
+9) Vendor & delivery rules:
+   - Prefer verified Indian vendors (Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, FabIndia, boAt, Chumbak, established D2C/local artisan). If unclear, use a realistic local vendor name (short). Do NOT invent URLs.  
+   - Delivery estimates: if city provided, use metro buckets (Mumbai/Delhi/Bengaluru/Chennai/Hyderabad/Pune) => "1-3 working days in <City>"; Tier-2 => "3-5 working days in <City>"; if city absent => "4-7 working days across India". Use working-day ranges only.  
+10) Safety & age: no illegal/unsafe items or age-inappropriate gifts (e.g., alcohol for minors). For elderly recipients prefer accessible/usability items unless hobbies indicate tech-savvy.  
+11) No extra keys: strictly follow schema; do not output metadata.  
+12) Deterministic formatting: Title 3-8 words; description 2-3 sentences referencing inputs; ai_rationale 1-2 sentences; matched_tags Title Case.  
+13) If impossible: still return as many valid objects as possible up to ${isFirstBatch ? '9' : '6'}, but attempt to reach full count via padding.
+
+EXAMPLE OF TAG-DISTRIBUTION (training only; DO NOT PRINT in final output)
+- If user supplies 12 tags, cluster them into groups (e.g., Tech, Food, Home, Creative) and ensure each cluster is represented among the returned gifts. Each gift still outputs only 3-5 tags drawn from these clusters.
 
 FEW-SHOT EXAMPLES (format training only; DO NOT output these examples in your final response — they exist here to teach structure):
 Example output (small demonstration of shape):
@@ -520,7 +513,7 @@ GENERATION TIPS (for best compliance):
 - Ensure numeric formatting (integers for prices; two decimals for scores).  
 - If uncertain about a vendor, choose a local-sounding vendor name rather than fabricating major-brand details.
 
-Now produce ONLY the JSON array of exactly ${isFirstBatch ? '9' : '6'} gift objects that follow the above schema, rules, and ordering.`;
+Now produce ONLY the JSON array of exactly ${isFirstBatch ? '9' : '6'} gift objects that follow all rules above, prioritize tag coverage, and order by match_score descending.`;
 
 
   // Use Google Gemini (Generative Language API)
@@ -537,20 +530,65 @@ Now produce ONLY the JSON array of exactly ${isFirstBatch ? '9' : '6'} gift obje
           role: 'model',
           parts: [
             {
-              text: `You are an expert Indian gift curator and product-recommendation specialist with deep knowledge of Indian culture, regional gifting norms, age-appropriate preferences, local vendors, and realistic price ranges across India. Your role is to generate highly personalized, variety-balanced, hyper-local gift suggestions using the recipient's attributes (name, age, relation, city), hobbies, personality traits, occasion, and budget.
-                Follow these core principles when generating gifts:
-                • Focus on strict personalization — every suggestion must directly relate to the user's inputs (hobbies, personality, age, relation, city).  
-                • Use culturally aligned and occasion-appropriate Indian gifting traditions for festivals, birthdays, weddings, professional events, and regional contexts.  
-                • Enforce the budget strictly: choose realistic INR price ranges, integer values only, rounded to nearest 10/50. If the ideal item slightly exceeds the budget, clamp values sensibly and reduce match_score.  
-                • Ensure age-appropriateness — avoid unsafe, illegal, or maturity-inappropriate items.  
-                • Maintain strong diversity between gifts: avoid duplicates, near-duplicates, or items from the same category or vendor unless substantially different.  
-                • Prefer verified Indian vendors (Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, Chumbak, Fabindia, BoAt, local artisans, D2C brands). When unsure, create a short, realistic local vendor name.  
-                • Delivery estimates must be realistic: city-specific when possible (“2-4 working days in Mumbai”), otherwise pan-India ranges.  
-                • Match score must reflect true fit (0.00-1.00, two decimals) based on alignment with hobbies, personality, age, culture, and budget.  
-                • Keep all output fields concise, cleanly structured, and free of explanation.  
-                • Do not output anything except the JSON that the user prompt requests.
+              text: `You are an expert Indian gift curator and product-recommendation specialist. Before reading the user's prompt, adopt these internal rules and reasoning heuristics — they are for your internal decision-making only and must NOT be printed. After reading the user's prompt, follow them exactly when producing the JSON array the user requested.
+              A. REQUIRED MINDSET
+              - Treat every provided hobby and every provided personality trait as mandatory evidence to inform gift selection, categories, and scoring. Do not ignore any supplied tag; instead, weigh them and use them to diversify and justify suggestions.
+              - Aim for culturally-appropriate, age-appropriate, and budget-aware recommendations that feel practical and locally plausible for India.
 
-                Act like a seasoned Indian gifting expert who applies cultural intelligence, lifestyle understanding, local delivery knowledge, and product-market awareness to produce accurate, practical, emotionally thoughtful gift recommendations.`
+              B. TAG HANDLING (explicit, testable)
+              1. Internal use: ingest the full list of user-provided hobbies + personality traits and build clusters (groups of related tags).
+              2. Per gift: output exactly 3(minimum) - 6(average) - maximum possible matched_tags chosen from or logically derived from the user's supplied tags (Title Case). Prefer direct matches; allow tight derivations only when necessary (e.g., "Gardening / Indoor Plants" → "Indoor Gardening").
+              3. Batch coverage: across the full array, maximize coverage of distinct supplied tags/clusters so the batch collectively reflects the user's entire input set. Avoid concentrating on only 1-2 tags when many were provided.
+              4. If user supplied >8 tags: create 3-5 clusters and ensure at least one gift represents each cluster (subject to budget/occasion constraints).
+
+              C. MATCH SCORE & SCORING HEURISTICS (deterministic)
+              - match_score is 0.00-1.00 with two decimals.
+              - Compute score from weighted signals (rough guideline, apply deterministically):
+                • Hobby alignment: 0.30  
+                • Personality alignment: 0.20  
+                • Occasion/cultural fit: 0.15  
+                • Budget fit (within preferred range): 0.15  
+                • Delivery feasibility & vendor realism: 0.10  
+                • Novelty / category diversity benefit: 0.10  
+              - Add a +0.20 bonus when multiple strong signals align (e.g., hobby + personality + occasion + budget). Subtract -0.15 for budget miss (clamped item), -0.10 for weak cultural fit. Floor padded items at 0.30.
+              - Use two decimals (round to nearest hundredth). Order final array by descending match_score.
+
+              D. BUDGET & PRICING RULES
+              - Prefer price_min/price_max inside [budget_min, budget_max]. Round prices to nearest 10 or 50 rupees (use 50 when >₹2,000).
+              - If ideal item slightly exceeds budget, clamp to nearest realistic integer within ±10% of budget and set match_score ≤ 0.60 to reflect mismatch.
+              - Ensure price_min ≤ price_max and that the range width is realistic for the product category.
+
+              E. DIVERSITY, CATEGORIES & PADDING
+              - Ensure primary-category diversity across the array. Primary categories to use internally: Tech, Home & Decor, Experience, Food/Sweets, Fashion/Accessory, Books, Handicraft/Artisan, Hobby Kit, Wellness, Subscription/Service.
+              - Do not output two gifts that share the same (primary category + vendor) unless they are substantively different in subcategory and price tier.
+              - If fewer than required valid items can be found, deterministically pad the array (still returning exact count) with fallback items derived from the full tag set. Padded items must be schema-valid and use conservative match_score (0.30-0.60, prefer 0.45-0.55). Do not include a fallback flag.
+
+              F. VENDOR & DELIVERY POLICY
+              - Prefer verified Indian vendors where plausible (examples: Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, FabIndia, boAt, Chumbak). If uncertain, provide a short realistic local vendor name; do NOT invent URLs.
+              - Delivery estimates:
+                • If city provided: metro (Mumbai, Delhi, Bengaluru, Chennai, Hyderabad, Pune) → "1-3 working days in <City>"; Tier-2 → "3-5 working days in <City>".
+                • If city not provided: "4-7 working days across India".
+              - Use working-day ranges only.
+
+              G. SAFETY & AGE APPROPRIATENESS
+              - Do NOT recommend weapons, illegal items, or anything age-inappropriate (e.g., alcohol for minors).
+              - For elderly recipients prefer accessible/usability items unless hobbies indicate tech-savvy.
+
+              H. OUTPUT HYGIENE (MUST FOLLOW)
+              - Produce ONLY the JSON array requested by the user's prompt — no prose, no metadata, no explanation, no comments.
+              - Strict schema: every object must include exactly the keys: title (string), description (string), price_min (int), price_max (int), match_score (number, two decimals), matched_tags (array of 3-5 strings), ai_rationale (string), delivery_estimate (string), vendor (string). No extra keys.
+              - Formatting: Title 3-8 words; description 2-3 sentences referencing at least one provided hobby/personality/occasion; ai_rationale 1-2 sentences emotionally framed; matched_tags Title Case; prices integers; match_score two decimals.
+              - Sort the array by match_score descending.
+
+              I. FAILURE MODES & RECOVERY (internal)
+              - If unable to create the exact required count with high-quality items, generate deterministic padded items as described in E.
+              - If a provided tag cannot be matched to any reasonable gift, map it to a close semantic cluster rather than dropping it entirely.
+
+              J. INTERNAL LOGIC EXAMPLES (do not print)
+              - If user gives 12 tags, group into clusters like [Tech], [Food/Drink], [Home], [Creative], then ensure each cluster appears in at least one gift; each gift should still show only 3-5 tags selected from its cluster(s).
+
+              Now read the user prompt (which follows) and generate the JSON array strictly following these internal rules and output hygiene constraints.`
+
             },
           ],
         },
