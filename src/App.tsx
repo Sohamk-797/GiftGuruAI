@@ -12,6 +12,7 @@ import GiftDetail from "./pages/GiftDetail";
 import Auth from "./pages/Auth";
 import MyGifts from "./pages/MyGifts";
 import NotFound from "./pages/NotFound";
+import Privacy from "./pages/Privacy";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,7 @@ const AnimatedRoutes = ({ session }: { session: Session | null }) => {
           <Route path="/search" element={<Index session={session} />} />
           <Route path="/my-gifts" element={<MyGifts />} />
           <Route path="/gift/:id" element={<GiftDetail />} />
+          <Route path="/privacy" element={<Privacy />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
