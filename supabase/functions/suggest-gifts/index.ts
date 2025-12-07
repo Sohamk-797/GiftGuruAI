@@ -298,90 +298,230 @@ serve(async (req: Request) => {
     const isFirstBatch = offset === 0;
 
     // Build prompt (same content as original)
-    const prompt = `You are an expert Indian gift curator and product recommender. Using the recipient attributes below, generate a compact JSON array of ${isFirstBatch ? '9' : '6'} unique, high-quality gift objects that STRICTLY follow the schema and rules. Output ONLY the JSON array (no prose, no markdown, no code fences, no extra keys).
-      Input (use exactly when present):
-      ${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
-      ${requestData.age ? `Age: ${requestData.age} years old` : ''}
-      Relation: ${requestData.relation}
-      Occasion: ${requestData.occasion}
-      Budget (INR): ${requestData.budget_min} - ${requestData.budget_max}
-      Hobbies: ${(Array.isArray(requestData.hobbies) ? requestData.hobbies.join(', ') : '')}
-      Personality: ${(Array.isArray(requestData.personalities) ? requestData.personalities.join(', ') : '')}
-      ${requestData.city ? `City: ${requestData.city}` : ''}
+    const prompt = `You are a senior Indian gift curator and product recommender. Using the recipient attributes below, generate a compact JSON array of exactly ${isFirstBatch ? '9' : '6'} unique, high-quality gift objects and RETURN ONLY THAT ARRAY (no prose, no markdown, no code fences, no additional keys). This prompt is strict: the caller expects exactly ${isFirstBatch ? '9' : '6'} valid objects every response.
 
-      REQUIRED OUTPUT SCHEMA (ALL KEYS REQUIRED; strict types):
-      {
-        "title": "<string, 3-8 words, product-style>",
-        "description": "<string, 2-3 sentences; mention why it suits the recipient>",
-        "price_min": <integer INR>,
-        "price_max": <integer INR>,
-        "match_score": <number between 0.00 and 1.00 with exactly two decimals>,
-        "matched_tags": ["Tag1", "Tag2", "Tag3"],  // 3-5 short tags (Title Case)
-        "ai_rationale": "<string, 1-2 sentences, emotionally framed>",
-        "delivery_estimate": "<string; working-day range, city-specific if city provided>",
-        "vendor": "<string; prefer verified Indian vendor or realistic local vendor name>"
-      }
+INPUT (use when present):
+${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
+${requestData.age ? `Age: ${requestData.age} years old` : ''}
+Relation: ${requestData.relation}
+Occasion: ${requestData.occasion}
+Budget (INR): ${requestData.budget_min} - ${requestData.budget_max}
+Hobbies: ${(Array.isArray(requestData.hobbies) ? requestData.hobbies.join(', ') : '')}
+Personality: ${(Array.isArray(requestData.personalities) ? requestData.personalities.join(', ') : '')}
+${requestData.city ? `City: ${requestData.city}` : ''}
 
-      DETAILED RULES (follow precisely):
-      A. JSON-only & types:
-        - Output MUST be exactly a JSON array. Do not print anything else.
-        - price_min and price_max MUST be integers (no decimals).
-        - match_score MUST be numeric with two decimal places (e.g., 0.92).
-        - matched_tags MUST contain 3-5 strings; at least one tag should match a provided hobby or personality trait when possible.
-        - Do NOT add extra keys; keep exact key names and types.
+STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
+[
+  {
+    "title": "<string, 3-8 words, product-style>",
+    "description": "<string, 2-3 sentences; explain why this suits the recipient and reference at least one hobby/personality or occasion>",
+    "price_min": <integer INR>,
+    "price_max": <integer INR, >= price_min>,
+    "match_score": <number between 0.00 and 1.00 with exactly two decimals>,
+    "matched_tags": ["Tag1","Tag2","Tag3"],   // 3-5 short tags (Title Case)
+    "ai_rationale": "<string, 1-2 sentences, emotionally framed and concise>",
+    "delivery_estimate": "<string; working-day range, city-specific if city provided>",
+    "vendor": "<string; prefer verified Indian vendors or realistic local vendor name>"
+  }, ...
+]
 
-      B. Budget & rounding:
-        - Prefer price_min/price_max within the requested [budget_min, budget_max].
-        - If an ideal product slightly exceeds the budget, clamp to the nearest realistic value within ±10% of the budget and set match_score <= 0.60 to reflect the mismatch.
-        - Round prices to the nearest 10 or 50 rupees (e.g., 1490, 1500, 1999).
+KEY RULES — MANDATORY (follow precisely)
+1) JSON-only: Output MUST be exactly a JSON array of ${isFirstBatch ? '9' : '6'} objects. No surrounding text, no explanations, no fences, no extra keys, no comments.  
+2) Exact count: Return EXACTLY ${isFirstBatch ? '9' : '6'} objects. The server will save them as-is.  
+3) Data types:
+   - price_min / price_max: integers in INR. No decimals.  
+   - match_score: numeric between 0.00 and 1.00 with exactly two decimals (e.g., 0.92).  
+   - matched_tags: array length 3-5, Title Case short tags (single words or short phrases).  
+4) Budget & rounding:
+   - Prefer price ranges fully within the provided [budget_min, budget_max].  
+   - If the ideal product slightly exceeds budget, clamp to the nearest realistic integer within ±10% and mark match_score <= 0.60.  
+   - Round prices to nearest 10 or 50 rupees (choose 50 for >₹2,000 ranges).  
+5) Price logic:
+   - Ensure price_min <= price_max.  
+   - Range width should be realistic (not absurdly narrow or wide).  
+6) Match score semantics (use these bands; two decimals):
+   - 0.70-1.00 = excellent fit  
+   - 0.50-0.69 = good fit  
+   - 0.30-0.49 = fair / backup or lower-confidence suggestion  
+   - <0.30 = aspirational / not recommended (avoid unless necessary)  
+   - Order final array by descending match_score (highest first).  
+7) Tags: At least one tag must directly match or closely map to a provided hobby or personality when possible. Use 3-5 tags per gift.  
+8) Diversity rule (deterministic):
+   - Each item must be from a distinct primary category (internally choose among: Tech, Home & Decor, Experience, Food/Sweets, Fashion/Accessory, Books, Handicraft/Artisan, Hobby Kit, Wellness, Subscription/Service).  
+   - No two gifts should share the same primary category + same vendor. If unavoidable, ensure substantial subcategory differences and different price tiers.  
+9) Padding behavior (model MUST implement):
+   - Primary attempt: list ${isFirstBatch ? '9' : '6'} high-quality, distinct items.  
+   - If you cannot identify enough high-quality distinct items, you MUST still return EXACTLY ${isFirstBatch ? '9' : '6'} objects by padding with deterministic fallback items derived from recipient inputs (use hobbies, personality, occasion to craft titles, tags, and rationale).  
+   - Padded items must be valid per schema and should have conservative match_score values (0.30-0.60, prefer 0.45-0.55). Do NOT add an explicit "fallback" flag.  
+10) Vendor rules:
+    - Prefer verified Indian vendors when appropriate: Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, FabIndia, BoAt, Chumbak, local artisan collectives, established D2C brands.  
+    - If no verified vendor fits, provide a realistic local/small-business vendor name (short), but do not invent URLs. Keep vendor field concise.  
+11) Delivery estimates:
+    - If city provided: metro buckets for Mumbai/Delhi/Bengaluru/Chennai/Hyderabad/Pune => "1-3 working days in <City>"; Tier-2 cities => "3-5 working days in <City>".  
+    - If city absent: "4-7 working days across India".  
+    - Use working-day ranges only.  
+12) Safety & age appropriateness:
+    - Do NOT recommend illegal, unsafe, or age-inappropriate items (e.g., alcohol for minors, weapons, hazardous items).  
+    - For elderly recipients prefer accessibility/usability unless hobbies indicate tech-savvy.  
+13) No extra keys: Strictly do not include any keys beyond the schema.  
+14) Determinism & formatting:
+    - Title length: 3-8 words, product-style (e.g., "Handcrafted Copper Tumbler").  
+    - Description: 2-3 sentences referencing recipient traits/hobbies/occasion.  
+    - ai_rationale: 1-2 emotionally-framed sentences (why this gift matters).  
+    - matched_tags: short, Title Case, reflect hobbies/personality.  
+    - Sort by match_score descending.  
+15) If constraints are impossible: still return as many valid items as possible up to ${isFirstBatch ? '9' : '6'}, but attempt to reach the full count via padding.
 
-      C. Price consistency:
-        - price_min <= price_max.
-        - Keep ranges realistic: width should reflect the product (e.g., a product bundle might have wider range).
+FEW-SHOT EXAMPLES (format training only; DO NOT output these examples in your final response — they exist here to teach structure):
+Example output (small demonstration of shape):
+[
+  {
+    "title": "Handwoven Khadi Shawl",
+    "description": "Soft handwoven khadi shawl with a subtle zari border — warm and breathable for evening gatherings, ideal for someone who values artisanal textiles.",
+    "price_min": 1499,
+    "price_max": 1999,
+    "match_score": 0.88,
+    "matched_tags": ["Handicraft", "Traditional", "Comfort"],
+    "ai_rationale": "A culturally resonant, practical gift for someone who appreciates handcrafted fabrics and understated elegance.",
+    "delivery_estimate": "3-5 working days in Pune",
+    "vendor": "FabIndia"
+  },
+  {
+    "title": "Artisanal Mithai Box",
+    "description": "Assorted handcrafted Indian sweets in premium packaging — perfect for festive celebrations and sharing with family.",
+    "price_min": 599,
+    "price_max": 899,
+    "match_score": 0.76,
+    "matched_tags": ["Food", "Festive", "SweetTooth"],
+    "ai_rationale": "A crowd-pleasing, culturally appropriate gift ideal for festivals and family gatherings.",
+    "delivery_estimate": "2-4 working days in Pune",
+    "vendor": "Local Sweets Co"
+  },
+  {
+    "title": "Luxurious Sandalwood Gift Hamper",
+    "description": "An elegant hamper featuring pure Mysore sandalwood soap, fragrance oil, and incense sticks — perfect for someone who appreciates timeless Indian aromas. The rich scent profile makes it suitable for calm evenings and traditional celebrations.",
+    "price_min": 899,
+    "price_max": 1299,
+    "match_score": 0.85,
+    "matched_tags": ["Aromatic", "Traditional", "Wellness"],
+    "ai_rationale": "A culturally rooted and soothing gift ideal for those who enjoy calm, fragrant spaces.",
+    "delivery_estimate": "3-5 working days across India",
+    "vendor": "Mysore Heritage"
+  },
+  {
+    "title": "Minimalist Leather Card Holder",
+    "description": "A premium hand-stitched leather card holder designed for sleek carry and quick access. Ideal for minimalists who prefer compact, clutter-free essentials over bulky wallets.",
+    "price_min": 699,
+    "price_max": 999,
+    "match_score": 0.83,
+    "matched_tags": ["Minimalist", "Fashion", "Organized"],
+    "ai_rationale": "A practical and stylish everyday accessory suitable for professionals and students alike.",
+    "delivery_estimate": "2-4 working days across India",
+    "vendor": "Urban Hide"
+  },
+  {
+    "title": "Terracotta Hand-Painted Planter",
+    "description": "A beautifully hand-painted terracotta planter crafted by local artisans, offering a vibrant touch to indoor or balcony spaces. Ideal for plant lovers who appreciate earthy, rustic decor.",
+    "price_min": 499,
+    "price_max": 799,
+    "match_score": 0.80,
+    "matched_tags": ["Gardening", "Artisan", "Decor"],
+    "ai_rationale": "Perfect for someone who enjoys nurturing plants and loves handcrafted traditional art.",
+    "delivery_estimate": "3-6 working days in Hyderabad",
+    "vendor": "ClayCraft India"
+  },
+  {
+    "title": "Handcrafted Copper Water Bottle",
+    "description": "A premium hammered-finish copper bottle known for its Ayurvedic benefits and elegant aesthetic. Ideal for health-conscious individuals who enjoy traditional Indian wellness practices.",
+    "price_min": 999,
+    "price_max": 1499,
+    "match_score": 0.86,
+    "matched_tags": ["Wellness", "Ayurveda", "Sustainable"],
+    "ai_rationale": "A thoughtful blend of tradition and health, perfect for daily hydration with wellness benefits.",
+    "delivery_estimate": "2-4 working days across India",
+    "vendor": "CopperVeda"
+  },
+  {
+    "title": "DIY Scented Candle-Making Kit",
+    "description": "A complete beginner-friendly kit with wax, essential oils, wicks, and jars for creating personalized candles. Excellent for creative personalities who enjoy hands-on hobbies.",
+    "price_min": 799,
+    "price_max": 1199,
+    "match_score": 0.82,
+    "matched_tags": ["Creative", "DIY", "HomeFragrance"],
+    "ai_rationale": "A fun and expressive DIY activity perfect for the creatively inclined.",
+    "delivery_estimate": "3-5 working days across India",
+    "vendor": "Craftology"
+  },
+  {
+    "title": "Luxury Kashmiri Dry Fruits Box",
+    "description": "A premium assortment of Kashmiri walnuts, almonds, and dried berries in elegant packaging. Ideal for food enthusiasts who enjoy high-quality, health-oriented snacks.",
+    "price_min": 1299,
+    "price_max": 1699,
+    "match_score": 0.84,
+    "matched_tags": ["Foodie", "Healthy", "Premium"],
+    "ai_rationale": "A festive and nutritious delight suited for gifting on special occasions or celebrations.",
+    "delivery_estimate": "2-4 working days across India",
+    "vendor": "Kashmir Naturals"
+  },
+  {
+    "title": "Handcrafted Mandala Wall Art",
+    "description": "A detailed, hand-drawn mandala artwork framed in polished wood — perfect to elevate bedroom or study aesthetics. Great for individuals who appreciate calm, mindful, and artistic designs.",
+    "price_min": 899,
+    "price_max": 1399,
+    "match_score": 0.87,
+    "matched_tags": ["Artistic", "Mindful", "Decor"],
+    "ai_rationale": "A serene and artistic gift ideal for someone who values meaningful, handcrafted decor.",
+    "delivery_estimate": "3-6 working days in Delhi",
+    "vendor": "ArtNest Studio"
+  },
+  {
+    "title": "Bluetooth Neckband With Deep Bass",
+    "description": "A lightweight ergonomic neckband featuring deep bass, long battery life, and fast charging — perfect for music lovers and on-the-go listeners.",
+    "price_min": 999,
+    "price_max": 1499,
+    "match_score": 0.89,
+    "matched_tags": ["Music", "Tech", "Lifestyle"],
+    "ai_rationale": "Ideal for daily commutes and workouts, especially for someone who loves music everywhere they go.",
+    "delivery_estimate": "2-4 working days across India",
+    "vendor": "boAt"
+  },
+  {
+    "title": "Premium Herbal Tea Selection",
+    "description": "A curated box of organic herbal teas including chamomile, tulsi, and rose blends — perfect for health-conscious individuals who enjoy calming evening rituals.",
+    "price_min": 699,
+    "price_max": 1099,
+    "match_score": 0.81,
+    "matched_tags": ["TeaLover", "Wellness", "Soothing"],
+    "ai_rationale": "A relaxing and wellness-first gift suitable for someone who enjoys mindful, calming beverages.",
+    "delivery_estimate": "3-5 working days across India",
+    "vendor": "TeaCulture Co"
+  },
+  {
+    "title": "Hardcover Journal With Custom Name",
+    "description": "A premium matte-finish hardcover journal embossed with the recipient's name — ideal for writers, students, or professionals who enjoy organized reflection.",
+    "price_min": 499,
+    "price_max": 899,
+    "match_score": 0.83,
+    "matched_tags": ["Writing", "Personalized", "Organized"],
+    "ai_rationale": "A thoughtful and personal gift for someone who loves writing or maintaining daily notes.",
+    "delivery_estimate": "3-6 working days in Mumbai",
+    "vendor": "InkPress"
+  }
+]
 
-      D. Match score (deterministic guidance):
-        - Use two-decimal values:
-          - 0.70-1.00 = excellent fit
-          - 0.50-0.69 = good fit
-          - 0.30-0.49 = fair
-          - <0.30 = weak / aspirational
-        - Prefer higher scores for items that: match hobbies, match personality, fit budget, are age-appropriate, and are culturally appropriate for the occasion.
-        - ORDER the array by descending match_score (highest first).
+INTERNAL (do not print) GUIDANCE TO FOLLOW WHILE DECIDING SCORES:
+- +0.20 if multiple strong signals align (hobby + personality + occasion + budget).  
+- -0.15 if candidate is outside budget but still chosen (clamp price and lower match_score).
+- -0.10 for marginally weaker cultural fit.  
+- Floor match_score at 0.30 for padded items unless totally aspirational.
 
-      E. Diversity & de-duplication:
-        - Ensure each item is categorically distinct: define category internally (e.g., Experience, Tech, Apparel, Home & Decor, Books, Food/Sweets, Handicraft).
-        - No two items should share the same primary category and vendor. If forced, differentiate by substantial subcategory and price.
-        - If ${isFirstBatch ? 'this is the first batch' : 'this is not the first batch'}, ensure items explore different categories and price tiers. For follow-up batches, produce COMPLETELY DIFFERENT categories and themes.
+GENERATION TIPS (for best compliance):
+- Use a deterministic, lower creativity setting: favor factual and structured outputs.  
+- Ensure numeric formatting (integers for prices; two decimals for scores).  
+- If uncertain about a vendor, choose a local-sounding vendor name rather than fabricating major-brand details.
 
-      F. Vendor rules:
-        - Prefer verified Indian vendors when feasible: Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, Chumbak, BoAt, Fabindia, local artisan collectives, or well-known D2C brands.
-        - If you cannot identify a verified vendor, provide a realistic local/small-business vendor name and append (local) implicitly by choosing the name — do NOT add a separate field.
-        - Do NOT invent a precise purchase URL. Keep vendor field as a short name only.
+Now produce ONLY the JSON array of exactly ${isFirstBatch ? '9' : '6'} gift objects that follow the above schema, rules, and ordering.`;
 
-      G. Delivery estimate:
-        - If city is provided, use city-aware buckets: within metro (Mumbai, Delhi, Bangalore, Chennai, Kolkata, Hyderabad, Pune): "1-3 working days in <City>"; Tier-2 cities: "3-5 working days in <City>"; pan-India: "4-7 working days across India".
-        - Use working-day ranges only (no exact dates).
-
-      H. Cultural & age appropriateness:
-        - For festival/occasion (Diwali, Raksha Bandhan, Wedding, Birthday), prefer culturally-aligned gifts (traditional crafts, sweets, experiences) when appropriate.
-        - Do not recommend age-inappropriate items (e.g., alcohol for minors, hazardous items).
-        - For elderly recipients, prefer accessibility/usability unless hobbies explicitly indicate tech-savvy.
-
-      I. Safety & disallowed:
-        - Do NOT recommend weapons, illegal substances, or unsafe items.
-        - If constrained inputs force such results, omit them and choose alternatives.
-
-      J. Formatting & determinism:
-        - Titles: 3-8 words, concise.
-        - Description: 2-3 sentences, mention recipient trait/hobby and why this fits.
-        - ai_rationale: 1-2 sentences, emotional/personalized.
-        - matched_tags: Title Case short tags.
-        - Always return as many items as requested (${isFirstBatch ? '9' : '6'}). If constraints prevent the full count, return the maximum valid items (non-empty array) but try to meet the requested count.
-
-      K. Internal reasoning (do not output):
-        - Internally decide a primary "category" for each gift to enforce diversity; do not output the category field.
-
-      Now produce ONLY the JSON array of ${isFirstBatch ? '9' : '6'} gift objects that strictly follow the schema and rules above.`;
 
   // Use Google Gemini (Generative Language API)
   // Model and endpoint
@@ -399,7 +539,6 @@ serve(async (req: Request) => {
             {
               text: `You are an expert Indian gift curator and product-recommendation specialist with deep knowledge of Indian culture, regional gifting norms, age-appropriate preferences, local vendors, and realistic price ranges across India. Your role is to generate highly personalized, variety-balanced, hyper-local gift suggestions using the recipient's attributes (name, age, relation, city), hobbies, personality traits, occasion, and budget.
                 Follow these core principles when generating gifts:
-
                 • Focus on strict personalization — every suggestion must directly relate to the user's inputs (hobbies, personality, age, relation, city).  
                 • Use culturally aligned and occasion-appropriate Indian gifting traditions for festivals, birthdays, weddings, professional events, and regional contexts.  
                 • Enforce the budget strictly: choose realistic INR price ranges, integer values only, rounded to nearest 10/50. If the ideal item slightly exceeds the budget, clamp values sensibly and reduce match_score.  
