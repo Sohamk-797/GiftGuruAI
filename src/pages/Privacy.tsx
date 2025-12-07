@@ -1,108 +1,214 @@
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { DarkModeToggle } from "@/components/DarkModeToggle";
+import { AnimatedBackground } from "@/components/AnimatedBackground";
 
 const Privacy = () => {
   useEffect(() => {
     console.log("Visited Privacy Policy page");
   }, []);
 
+  const lastUpdated = "December 2025";
+
   return (
-    <div className="min-h-screen bg-muted p-6 md:p-12">
-      <div className="max-w-3xl mx-auto bg-background rounded-lg shadow-md p-8">
-        <h1 className="text-4xl font-bold mb-6 text-center">Privacy Policy</h1>
+    <div className="min-h-screen relative">
+      <AnimatedBackground />
+      <DarkModeToggle />
 
-        <p className="text-muted-foreground mb-4">
-          Last updated: December 2025
-        </p>
+      <div className="container mx-auto px-4 py-12 animate-fade-in">
+        <div className="max-w-4xl mx-auto">
+          <Card className="shadow-2xl border-2 bg-background/80 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-4xl md:text-5xl font-bold text-center">
+                Privacy Policy
+              </CardTitle>
+              <CardDescription className="text-center text-muted-foreground">
+                Last updated: {lastUpdated}
+              </CardDescription>
+            </CardHeader>
 
-        <p className="mb-4">
-          Welcome to <strong>Gift Guru AI</strong>. Your privacy is extremely important to us.
-          This Privacy Policy explains how we collect, use, and protect your
-          information when you use our website and services.
-        </p>
+            <CardContent className="prose prose-invert max-w-none p-8 md:p-10">
+              <section>
+                <h2>Introduction</h2>
+                <p>
+                  Welcome to <strong>Gift Guru AI</strong> (the "Service"). Your privacy matters to
+                  us. This Privacy Policy explains what information we collect, how we use it, who we
+                  share it with, and the choices you have.
+                </p>
+              </section>
 
-        <h2 className="text-2xl font-semibold mt-8 mb-3">1. Information We Collect</h2>
+              <section>
+                <h2>1. Information We Collect</h2>
+                <p>We collect only the information necessary to provide and improve our service:</p>
+                <ul>
+                  <li>
+                    <strong>Account information:</strong> If you sign-in with Google, we receive
+                    basic profile information (name, email, profile picture) to authenticate and
+                    personalize your experience.
+                  </li>
+                  <li>
+                    <strong>Gift request details:</strong> Name, age, relation, occasion, hobbies,
+                    personality traits, budget range, city — these are provided by you to generate
+                    personalized suggestions.
+                  </li>
+                  <li>
+                    <strong>Search history & results:</strong> With your permission we store recent
+                    searches and the generated result set so you can revisit past recommendations.
+                  </li>
+                  <li>
+                    <strong>Usage & diagnostics:</strong> Anonymous usage data and errors to help
+                    improve the product.
+                  </li>
+                </ul>
+              </section>
 
-        <p className="mb-4">
-          We collect only the minimum information required to provide our gift 
-          recommendation service:
-        </p>
+              <section>
+                <h2>2. How We Use Your Information</h2>
+                <ul>
+                  <li>Generate personalized gift recommendations tailored to your inputs.</li>
+                  <li>Authenticate users and manage sessions securely.</li>
+                  <li>Improve the Service, analyze trends, and fix issues.</li>
+                  <li>Send transactional messages related to your account (if any).</li>
+                </ul>
+              </section>
 
-        <ul className="list-disc pl-6 mb-4 space-y-2">
-          <li><strong>Google Account Information</strong> (when you sign in via Google) — name, email, and profile picture.</li>
-          <li><strong>Gift Preferences</strong> entered by you to receive better recommendations.</li>
-          <li><strong>Usage data</strong> such as search activity and browsing interactions.</li>
-        </ul>
+              <section>
+                <h2>3. Data Sharing & Third Parties</h2>
+                <p>We do not sell your personal information. We may share data with service providers:</p>
+                <ul>
+                  <li>
+                    <strong>Supabase</strong> — for authentication and persistent storage of
+                    search-history and user data.
+                  </li>
+                  <li>
+                    <strong>Google OAuth</strong> — to authenticate users who sign-in with Google.
+                  </li>
+                  <li>
+                    <strong>Unsplash (or image providers)</strong> — to fetch images used in
+                    recommendations. We request images from third-party APIs but do not share your
+                    personal data with them beyond what is necessary for the request.
+                  </li>
+                </ul>
+                <p>
+                  Each provider is selected for reliability and security. We require vendors to
+                  follow industry-standard security practices.
+                </p>
+              </section>
 
-        <h2 className="text-2xl font-semibold mt-8 mb-3">2. How We Use Your Information</h2>
+              <section>
+                <h2>4. Cookies & Local Storage</h2>
+                <p>
+                  We use cookies and browser storage only for essential functionality:
+                </p>
+                <ul>
+                  <li>Session management (keeps you signed in).</li>
+                  <li>Temporary caching of recent suggestions to improve responsiveness.</li>
+                </ul>
+                <p>
+                  We do not use tracking cookies for advertising or cross-site user profiling.
+                </p>
+              </section>
 
-        <p className="mb-4">We use your data only for:</p>
+              <section>
+                <h2>5. Data Retention</h2>
+                <p>
+                  We retain account and search-history data for as long as you keep your account or
+                  until you request deletion. Usage logs and anonymized analytics may be retained
+                  longer for product improvement, but they won't contain direct identifiers.
+                </p>
+              </section>
 
-        <ul className="list-disc pl-6 mb-4 space-y-2">
-          <li>Personalized gift suggestions</li>
-          <li>Improving app performance and user experience</li>
-          <li>Authentication and secure login</li>
-        </ul>
+              <section>
+                <h2>6. Your Rights</h2>
+                <p>
+                  Depending on your jurisdiction, you may have rights such as:
+                </p>
+                <ul>
+                  <li>Access the personal data we hold about you.</li>
+                  <li>Request correction or deletion of your personal data.</li>
+                  <li>Export your personal data in a machine-readable format.</li>
+                </ul>
+                <p>
+                  To exercise any of these rights, contact us at the address below. We will respond
+                  to validated requests within a reasonable timeframe.
+                </p>
+              </section>
 
-        <h2 className="text-2xl font-semibold mt-8 mb-3">3. Data Sharing</h2>
+              <section>
+                <h2>7. Security</h2>
+                <p>
+                  We use industry-standard measures to protect data in transit and at rest, including
+                  HTTPS/TLS and Supabase managed security features. While we strive to protect your
+                  information, no system is 100% secure — if a breach occurs we will follow applicable
+                  laws and notify affected users as required.
+                </p>
+              </section>
 
-        <p className="mb-4">
-          We <strong>never sell</strong> your data.  
-          We share data only with trusted services essential to operations:
-        </p>
+              <section>
+                <h2>8. Children</h2>
+                <p>
+                  Gift Guru AI is not intended for use by children under 13. We do not knowingly
+                  collect personal data from children. If you believe a child has provided us
+                  personal data, contact us and we will delete it.
+                </p>
+              </section>
 
-        <ul className="list-disc pl-6 mb-4 space-y-2">
-          <li><strong>Supabase</strong> — authentication & database</li>
-          <li><strong>Google OAuth</strong> — login and identity verification</li>
-          <li><strong>Unsplash</strong> — gift image fetching</li>
-        </ul>
+              <section>
+                <h2>9. International Transfers</h2>
+                <p>
+                  Your data may be stored and processed in the countries where our service providers
+                  operate. We take reasonable steps to ensure adequate protections are in place when
+                  transferring data internationally.
+                </p>
+              </section>
 
-        <p className="mb-4">
-          All integrations follow strict security and privacy standards.
-        </p>
+              <section>
+                <h2>10. Changes to This Policy</h2>
+                <p>
+                  We may update this Privacy Policy to reflect changes in our practices or legal
+                  requirements. If we make material changes, we'll post a notice here with an updated
+                  "Last updated" date.
+                </p>
+              </section>
 
-        <h2 className="text-2xl font-semibold mt-8 mb-3">4. Cookies</h2>
+              <section>
+                <h2>11. Contact</h2>
+                <p>
+                  If you have questions, want to access or delete your data, or otherwise contact us,
+                  please email:
+                </p>
+                <p className="font-medium">
+                  📧{" "}
+                  <a
+                    href="mailto:sohamk797@gmail.com"
+                    className="text-primary underline hover:text-primary/90"
+                  >
+                    sohamk797@gmail.com
+                  </a>
+                </p>
+                <p className="mt-4">
+                  We will respond to verified requests as promptly as possible and in accordance
+                  with applicable law.
+                </p>
+              </section>
 
-        <p className="mb-4">
-          Gift Guru AI uses cookies only for essential authentication and to
-          maintain your logged-in session. We do not track users across websites.
-        </p>
-
-        <h2 className="text-2xl font-semibold mt-8 mb-3">5. Your Rights</h2>
-
-        <p className="mb-4">
-          You can request deletion of your data at any time by contacting us.
-          You also have the right to:
-        </p>
-
-        <ul className="list-disc pl-6 mb-4 space-y-2">
-          <li>Access your stored data</li>
-          <li>Update or correct information</li>
-          <li>Delete your account</li>
-        </ul>
-
-        <h2 className="text-2xl font-semibold mt-8 mb-3">6. Security</h2>
-
-        <p className="mb-4">
-          We use industry-standard encryption, secure authentication, and
-          Supabase’s managed security features to protect your data.
-        </p>
-
-        <h2 className="text-2xl font-semibold mt-8 mb-3">7. Contact Us</h2>
-
-        <p className="mb-4">
-          If you have any questions about this Privacy Policy, you can contact us at:
-        </p>
-
-        <p className="font-medium">
-          📧 Email: <a href="mailto:sohamk797@gmail.com" className="text-primary underline">
-            sohamk797@gmail.com
-          </a>
-        </p>
-
-        <div className="mt-10 text-center">
-          <a href="/" className="text-primary underline hover:text-primary/90">
-            Return to Home
-          </a>
+              <div className="mt-8 flex justify-center gap-4">
+                <a href="/" className="no-underline">
+                  <Button variant="outline">Return to Home</Button>
+                </a>
+                <a href="/terms" className="no-underline">
+                  <Button>View Terms of Service</Button>
+                </a>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
