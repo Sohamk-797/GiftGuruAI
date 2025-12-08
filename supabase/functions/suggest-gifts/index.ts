@@ -351,11 +351,9 @@ MANDATORY RULES (IMPLEMENT PRECISELY)
 
 Now produce the JSON array of candidate gifts (no prose).`;
 
-
-
   // Use Google Gemini (Generative Language API)
   // Model and endpoint
-  const modelId = 'gemini-2.5-flash';
+  const modelId = 'gemini-2.5-flash-lite';
   const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
 
   // Build a helper to send Gemini requests (allows retries with different generationConfig)
@@ -1124,12 +1122,8 @@ try {
   if (paddedCount > 0) console.log(`Used ${paddedCount} padded fallback gifts to reach required count (${requiredCount}).`);
 } catch (e) {}
 
-// -------------------- END normalization/scoring/enforcement --------------------
-
-
-
     // FRONTEND_BASE_URL for buy links
-    const FRONTEND_BASE_URL = Deno.env.get('VITE_FRONTEND_BASE_URL') || 'https://example.com';
+    const FRONTEND_BASE_URL = Deno.env.get('VITE_FRONTEND_BASE_URL') || 'https://gift-guru-ai.vercel.app';
 
     // Enrich gifts with images, insert into DB and update buy_link
     const enrichedGifts = await Promise.all(
