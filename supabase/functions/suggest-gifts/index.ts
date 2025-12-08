@@ -33,22 +33,35 @@ interface GiftRequest {
   offset?: number;
 }
 
-// Utility: deterministic search key for caching images
-const createSearchKey = (title: string, tags: string[]): string =>
-  `${title.toLowerCase()}_${tags.slice(0, 3).join('_').toLowerCase()}`.replace(/[^a-z0-9_]/g, '_');
+const createSearchKey = (title: any, tags: any[] = []): string => {
+  const t = (title === null || title === undefined) ? '' : String(title).trim();
+  // include up to 12 tags to avoid collisions while keeping key reasonable
+  const safeTags = Array.isArray(tags)
+    ? tags.map((x: any) => (x === null || x === undefined ? '' : String(x).trim())).filter(Boolean).slice(0, 12)
+    : [];
+  const tagStr = safeTags.join('_');
+  // build key, lowercase and replace non-alphanum with underscore, and limit length to 200 chars
+  const raw = `${t.toLowerCase()}_${tagStr.toLowerCase()}`;
+  const cleaned = raw.replace(/[^a-z0-9_]/g, '_');
+  return cleaned.length > 200 ? cleaned.slice(0, 200) : cleaned;
+};
 
 // Fetch image from Unsplash with caching in DB
 async function fetchGiftImage(
   supabaseAdmin: any,
-  title: string,
-  tags: string[]
+  title: any,
+  tags: any[] = []
 ): Promise<any> {
-  const searchKey = createSearchKey(title, tags);
+  // Coerce inputs to safe strings
+  const safeTitle = (title === null || title === undefined) ? '' : String(title);
+  const safeTags = Array.isArray(tags) ? tags.map((t: any) => (t === null || t === undefined) ? '' : String(t)) : [];
+  const searchKey = createSearchKey(safeTitle, safeTags);
 
   try {
     // Check cache first
     const { data: cached, error: cacheError } = await supabaseAdmin
     .from('gift_image_cache')
+    
     .select('image_urls, attribution')
     .eq('search_key', searchKey)
     .maybeSingle();
@@ -64,11 +77,9 @@ async function fetchGiftImage(
       console.warn('UNSPLASH_ACCESS_KEY not configured, using placeholder');
       return null;
     }
-
-    const query = `${title} ${tags.join(' ')} India gift`;
-    const unsplashUrl = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`;
-
-        const response = await fetchWithRetry(unsplashUrl, {
+      const query = `${safeTitle} ${safeTags.join(' ')} India gift`.trim();
+      const unsplashUrl = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`;
+      const response = await fetchWithRetry(unsplashUrl, {
       headers: {
         'Authorization': `Client-ID ${UNSPLASH_ACCESS_KEY}`,
       },
@@ -135,8 +146,9 @@ const categoryImages = {
   default: 'https://images.unsplash.com/photo-1549465220-1a8b9238cd48?w=480&h=300&fit=crop',
 };
 
-const getFallbackImage = (tags: string[]) => {
-  const tagLower = tags?.[0]?.toLowerCase() || '';
+const getFallbackImage = (tags: any[] = []) => {
+  const first = (Array.isArray(tags) && tags.length > 0) ? tags[0] : '';
+  const tagLower = (first === null || first === undefined) ? '' : String(first).toLowerCase();
   if (tagLower.includes('art') || tagLower.includes('creative') || tagLower.includes('painting')) {
     return categoryImages.creative;
   }
@@ -154,6 +166,7 @@ const getFallbackImage = (tags: string[]) => {
   }
   return categoryImages.default;
 };
+
 
 // Validate JWT and extract user ID (same behavior as before)
 async function validateAuthToken(authHeader: string | null, supabaseUrl: string, supabaseKey: string): Promise<string | null> {
@@ -298,7 +311,8 @@ serve(async (req: Request) => {
     const isFirstBatch = offset === 0;
 
     // Build prompt (same content as original)
-    const prompt = `You are a senior Indian gift curator and product recommender. Using the recipient attributes below, generate a compact JSON array of exactly ${isFirstBatch ? '9' : '6'} unique, high-quality gift objects and RETURN ONLY THAT ARRAY (no prose, no markdown, no code fences, no additional keys). This prompt is strict: the caller expects exactly ${isFirstBatch ? '9' : '6'} valid objects every response.
+    // Build prompt (slightly adjusted - model should still produce JSON but server will enforce exact count & final scoring)
+const prompt = `You are a senior Indian gift curator and product recommender. Using the recipient attributes below, generate a compact JSON array of unique, high-quality gift objects that follow the schema described. The model should return gift candidates (the model's match_score and matched_tags are suggestions). IMPORTANT: the server will compute final match_score using the full set of provided tags and will enforce the exact batch size (${isFirstBatch ? '9' : '6'}) before returning results to the client — so focus on producing high-quality candidate objects in the requested schema (no surrounding prose, no markdown, no code fences, no additional keys).
 
 INPUT (use when present):
 ${requestData.name ? `Recipient Name: ${requestData.name}` : ''}
@@ -311,10 +325,9 @@ Personality: ${(Array.isArray(requestData.personalities) ? requestData.personali
 ${requestData.city ? `City: ${requestData.city}` : ''}
 
 CORE TAG HANDLING (MUST FOLLOW EXACTLY):
-- You MUST internally consider *every* hobby and *every* personality trait the user provided when reasoning about gifts. Treat the full list as evidence to influence category choice, scoring, and tag selection.
-- Per gift: output exactly 3(minimum) - 6(average) - maximum possible matched_tags (Title Case). These must be chosen from or logically derived from the user's full supplied list when possible.
-- Batch-level coverage: across the entire returned array of ${isFirstBatch ? '9' : '6'} gifts, attempt to cover as many distinct user-supplied hobbies/personality traits as reasonably possible. If the user supplied >8 tags, cluster similar tags and ensure each cluster is represented across different gifts.
-- Tag derivation: you may map a supplied tag to a close variant for clarity (e.g., "Gardening / Indoor Plants" → "Indoor Gardening"). Prefer direct matches when available.
+- Internally consider *every* hobby and *every* personality trait the user provided when reasoning about gifts. Treat the full list as evidence to influence category choice, scoring, and tag selection.
+- Per gift: output 3-6 short matched_tags (Title Case). These are a concise summary; the server will still use the full input tags for final scoring.
+- Batch-level coverage: across the returned array of ${isFirstBatch ? '9' : '6'} gifts, attempt to cover as many distinct user-supplied hobbies/personality clusters as reasonably possible.
 
 STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
 [
@@ -323,8 +336,8 @@ STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
     "description": "<string, 2-3 sentences; explain why this suits the recipient and reference at least one hobby/personality or the occasion>",
     "price_min": <integer INR>,
     "price_max": <integer INR, >= price_min>,
-    "match_score": <number between 0.00 and 1.00 with exactly two decimals>,
-    "matched_tags": ["Tag1","Tag2","Tag3"],   // 3-5 short tags (Title Case)
+    "match_score": <number between 0.00 and 1.00 with two decimals>,   // MODEL-SUGGESTED only; server will recalc
+    "matched_tags": ["Tag1","Tag2","Tag3"],   // 3-6 short tags (Title Case) — SERVER WILL ALSO USE ALL SUPPLIED TAGS
     "ai_rationale": "<string, 1-2 sentences, emotionally framed and concise>",
     "delivery_estimate": "<string; working-day range, city-specific if city provided>",
     "vendor": "<string; prefer verified Indian vendors or realistic local vendor name>"
@@ -332,188 +345,12 @@ STRICT OUTPUT SCHEMA (ALL FIELDS REQUIRED; EXACT TYPES AND NAMES):
 ]
 
 MANDATORY RULES (IMPLEMENT PRECISELY)
-1) JSON-only / exact count: Output MUST be exactly a JSON array of ${isFirstBatch ? '9' : '6'} objects. No surrounding text, no extra keys, no comments.  
-2) Types & formatting:
-   - price_min / price_max: integer INR (no decimals). Round to nearest 10 or 50 (50 for >₹2,000 ranges).  
-   - match_score: numeric, two decimals (0.00-1.00).  
-   - matched_tags: 3-5 tags, Title Case.  
-3) Budget enforcement:
-   - Prefer price ranges inside [budget_min, budget_max]. If an ideal product slightly exceeds budget, clamp to nearest realistic integer within ±10% and set match_score <= 0.60 to reflect mismatch.  
-4) Price sanity: price_min <= price_max; range widths should be realistic for item type.  
-5) Match score policy (two decimals):
-   - 0.70-1.00 = excellent fit  
-   - 0.50-0.69 = good fit  
-   - 0.30-0.49 = fair / padded or weaker fit  
-   - <0.30 = aspirational (avoid unless necessary)  
-   - Sort array by descending match_score.  
-6) Tag constraints:
-   - Each gift must include at least one tag directly matching (or clearly derived from) the supplied hobbies/personality traits.  
-   - Across the whole batch, maximize coverage of distinct supplied tags/clusters.  
-7) Diversity:
-   - Ensure primary-category diversity among returned gifts (choose from Tech, Home & Decor, Experience, Food/Sweets, Fashion/Accessory, Books, Handicraft/Artisan, Hobby Kit, Wellness, Subscription/Service).  
-   - Avoid same (primary category + vendor) duplicates. If unavoidable, ensure substantial subcategory differences and different price tiers.  
-8) Padding requirement:
-   - If you cannot find enough high-quality distinct items, you MUST still return exactly ${isFirstBatch ? '9' : '6'} objects by padding with deterministic fallback items derived from the complete set of supplied tags. Padded items must be valid per schema and have conservative match_score (0.30-0.60; prefer 0.45-0.55). Do NOT add an explicit fallback flag.  
-9) Vendor & delivery rules:
-   - Prefer verified Indian vendors (Amazon India, Flipkart, Myntra, Nykaa, Pepperfry, FabIndia, boAt, Chumbak, established D2C/local artisan). If unclear, use a realistic local vendor name (short). Do NOT invent URLs.  
-   - Delivery estimates: if city provided, use metro buckets (Mumbai/Delhi/Bengaluru/Chennai/Hyderabad/Pune) => "1-3 working days in <City>"; Tier-2 => "3-5 working days in <City>"; if city absent => "4-7 working days across India". Use working-day ranges only.  
-10) Safety & age: no illegal/unsafe items or age-inappropriate gifts (e.g., alcohol for minors). For elderly recipients prefer accessible/usability items unless hobbies indicate tech-savvy.  
-11) No extra keys: strictly follow schema; do not output metadata.  
-12) Deterministic formatting: Title 3-8 words; description 2-3 sentences referencing inputs; ai_rationale 1-2 sentences; matched_tags Title Case.  
-13) If impossible: still return as many valid objects as possible up to ${isFirstBatch ? '9' : '6'}, but attempt to reach full count via padding.
+1) JSON-only output: model should return a JSON array of candidate objects. The server will enforce exact count and final scores.
+2) Types & formatting: price_min / price_max integers; match_score model-suggestion can be present but server will compute final match_score.
+3) Budget enforcement & diversity: prefer price ranges inside [budget_min, budget_max]; ensure category diversity where possible.
 
-EXAMPLE OF TAG-DISTRIBUTION (training only; DO NOT PRINT in final output)
-- If user supplies 12 tags, cluster them into groups (e.g., Tech, Food, Home, Creative) and ensure each cluster is represented among the returned gifts. Each gift still outputs only 3-5 tags drawn from these clusters.
+Now produce the JSON array of candidate gifts (no prose).`;
 
-FEW-SHOT EXAMPLES (format training only; DO NOT output these examples in your final response — they exist here to teach structure):
-Example output (small demonstration of shape):
-[
-  {
-    "title": "Handwoven Khadi Shawl",
-    "description": "Soft handwoven khadi shawl with a subtle zari border — warm and breathable for evening gatherings, ideal for someone who values artisanal textiles.",
-    "price_min": 1499,
-    "price_max": 1999,
-    "match_score": 0.88,
-    "matched_tags": ["Handicraft", "Traditional", "Comfort"],
-    "ai_rationale": "A culturally resonant, practical gift for someone who appreciates handcrafted fabrics and understated elegance.",
-    "delivery_estimate": "3-5 working days in Pune",
-    "vendor": "FabIndia"
-  },
-  {
-    "title": "Artisanal Mithai Box",
-    "description": "Assorted handcrafted Indian sweets in premium packaging — perfect for festive celebrations and sharing with family.",
-    "price_min": 599,
-    "price_max": 899,
-    "match_score": 0.76,
-    "matched_tags": ["Food", "Festive", "SweetTooth"],
-    "ai_rationale": "A crowd-pleasing, culturally appropriate gift ideal for festivals and family gatherings.",
-    "delivery_estimate": "2-4 working days in Pune",
-    "vendor": "Local Sweets Co"
-  },
-  {
-    "title": "Luxurious Sandalwood Gift Hamper",
-    "description": "An elegant hamper featuring pure Mysore sandalwood soap, fragrance oil, and incense sticks — perfect for someone who appreciates timeless Indian aromas. The rich scent profile makes it suitable for calm evenings and traditional celebrations.",
-    "price_min": 899,
-    "price_max": 1299,
-    "match_score": 0.85,
-    "matched_tags": ["Aromatic", "Traditional", "Wellness"],
-    "ai_rationale": "A culturally rooted and soothing gift ideal for those who enjoy calm, fragrant spaces.",
-    "delivery_estimate": "3-5 working days across India",
-    "vendor": "Mysore Heritage"
-  },
-  {
-    "title": "Minimalist Leather Card Holder",
-    "description": "A premium hand-stitched leather card holder designed for sleek carry and quick access. Ideal for minimalists who prefer compact, clutter-free essentials over bulky wallets.",
-    "price_min": 699,
-    "price_max": 999,
-    "match_score": 0.83,
-    "matched_tags": ["Minimalist", "Fashion", "Organized"],
-    "ai_rationale": "A practical and stylish everyday accessory suitable for professionals and students alike.",
-    "delivery_estimate": "2-4 working days across India",
-    "vendor": "Urban Hide"
-  },
-  {
-    "title": "Terracotta Hand-Painted Planter",
-    "description": "A beautifully hand-painted terracotta planter crafted by local artisans, offering a vibrant touch to indoor or balcony spaces. Ideal for plant lovers who appreciate earthy, rustic decor.",
-    "price_min": 499,
-    "price_max": 799,
-    "match_score": 0.80,
-    "matched_tags": ["Gardening", "Artisan", "Decor"],
-    "ai_rationale": "Perfect for someone who enjoys nurturing plants and loves handcrafted traditional art.",
-    "delivery_estimate": "3-6 working days in Hyderabad",
-    "vendor": "ClayCraft India"
-  },
-  {
-    "title": "Handcrafted Copper Water Bottle",
-    "description": "A premium hammered-finish copper bottle known for its Ayurvedic benefits and elegant aesthetic. Ideal for health-conscious individuals who enjoy traditional Indian wellness practices.",
-    "price_min": 999,
-    "price_max": 1499,
-    "match_score": 0.86,
-    "matched_tags": ["Wellness", "Ayurveda", "Sustainable"],
-    "ai_rationale": "A thoughtful blend of tradition and health, perfect for daily hydration with wellness benefits.",
-    "delivery_estimate": "2-4 working days across India",
-    "vendor": "CopperVeda"
-  },
-  {
-    "title": "DIY Scented Candle-Making Kit",
-    "description": "A complete beginner-friendly kit with wax, essential oils, wicks, and jars for creating personalized candles. Excellent for creative personalities who enjoy hands-on hobbies.",
-    "price_min": 799,
-    "price_max": 1199,
-    "match_score": 0.82,
-    "matched_tags": ["Creative", "DIY", "HomeFragrance"],
-    "ai_rationale": "A fun and expressive DIY activity perfect for the creatively inclined.",
-    "delivery_estimate": "3-5 working days across India",
-    "vendor": "Craftology"
-  },
-  {
-    "title": "Luxury Kashmiri Dry Fruits Box",
-    "description": "A premium assortment of Kashmiri walnuts, almonds, and dried berries in elegant packaging. Ideal for food enthusiasts who enjoy high-quality, health-oriented snacks.",
-    "price_min": 1299,
-    "price_max": 1699,
-    "match_score": 0.84,
-    "matched_tags": ["Foodie", "Healthy", "Premium"],
-    "ai_rationale": "A festive and nutritious delight suited for gifting on special occasions or celebrations.",
-    "delivery_estimate": "2-4 working days across India",
-    "vendor": "Kashmir Naturals"
-  },
-  {
-    "title": "Handcrafted Mandala Wall Art",
-    "description": "A detailed, hand-drawn mandala artwork framed in polished wood — perfect to elevate bedroom or study aesthetics. Great for individuals who appreciate calm, mindful, and artistic designs.",
-    "price_min": 899,
-    "price_max": 1399,
-    "match_score": 0.87,
-    "matched_tags": ["Artistic", "Mindful", "Decor"],
-    "ai_rationale": "A serene and artistic gift ideal for someone who values meaningful, handcrafted decor.",
-    "delivery_estimate": "3-6 working days in Delhi",
-    "vendor": "ArtNest Studio"
-  },
-  {
-    "title": "Bluetooth Neckband With Deep Bass",
-    "description": "A lightweight ergonomic neckband featuring deep bass, long battery life, and fast charging — perfect for music lovers and on-the-go listeners.",
-    "price_min": 999,
-    "price_max": 1499,
-    "match_score": 0.89,
-    "matched_tags": ["Music", "Tech", "Lifestyle"],
-    "ai_rationale": "Ideal for daily commutes and workouts, especially for someone who loves music everywhere they go.",
-    "delivery_estimate": "2-4 working days across India",
-    "vendor": "boAt"
-  },
-  {
-    "title": "Premium Herbal Tea Selection",
-    "description": "A curated box of organic herbal teas including chamomile, tulsi, and rose blends — perfect for health-conscious individuals who enjoy calming evening rituals.",
-    "price_min": 699,
-    "price_max": 1099,
-    "match_score": 0.81,
-    "matched_tags": ["TeaLover", "Wellness", "Soothing"],
-    "ai_rationale": "A relaxing and wellness-first gift suitable for someone who enjoys mindful, calming beverages.",
-    "delivery_estimate": "3-5 working days across India",
-    "vendor": "TeaCulture Co"
-  },
-  {
-    "title": "Hardcover Journal With Custom Name",
-    "description": "A premium matte-finish hardcover journal embossed with the recipient's name — ideal for writers, students, or professionals who enjoy organized reflection.",
-    "price_min": 499,
-    "price_max": 899,
-    "match_score": 0.83,
-    "matched_tags": ["Writing", "Personalized", "Organized"],
-    "ai_rationale": "A thoughtful and personal gift for someone who loves writing or maintaining daily notes.",
-    "delivery_estimate": "3-6 working days in Mumbai",
-    "vendor": "InkPress"
-  }
-]
-
-INTERNAL (do not print) GUIDANCE TO FOLLOW WHILE DECIDING SCORES:
-- +0.20 if multiple strong signals align (hobby + personality + occasion + budget).  
-- -0.15 if candidate is outside budget but still chosen (clamp price and lower match_score).
-- -0.10 for marginally weaker cultural fit.  
-- Floor match_score at 0.30 for padded items unless totally aspirational.
-
-GENERATION TIPS (for best compliance):
-- Use a deterministic, lower creativity setting: favor factual and structured outputs.  
-- Ensure numeric formatting (integers for prices; two decimals for scores).  
-- If uncertain about a vendor, choose a local-sounding vendor name rather than fabricating major-brand details.
-
-Now produce ONLY the JSON array of exactly ${isFirstBatch ? '9' : '6'} gift objects that follow all rules above, prioritize tag coverage, and order by match_score descending.`;
 
 
   // Use Google Gemini (Generative Language API)
@@ -902,11 +739,393 @@ let giftsText: string | null = null;
     }
 
     // 6) Normalize to array
-    if (!Array.isArray(parsed)) {
-      parsed = [parsed];
+    // 6) Normalize to array
+if (!Array.isArray(parsed)) {
+  parsed = [parsed];
+}
+
+aiGifts = parsed;
+
+// -------------------- SERVER-SIDE NORMALIZATION, SCORING & ENFORCEMENT --------------------
+// Ensure deterministic final results: normalize parsed gifts, compute server-side final match_score
+// using all user-supplied tags, then sort/trim/pad to requiredCount before enrichment.
+
+// Helper: basic tokenizer (lowercase, split on non-alphanum)
+const tokenize = (s: any) => {
+  const str = (s === null || s === undefined) ? '' : String(s);
+  return str.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+};
+
+const rawTagList: string[] = [
+  ...(Array.isArray(requestData.hobbies) ? requestData.hobbies : []),
+  ...(Array.isArray(requestData.personalities) ? requestData.personalities : []),
+].map((t: any) => {
+  // coerce to string and trim - avoid calling .trim on non-strings
+  return t === null || t === undefined ? '' : String(t).trim();
+}).filter((t: string) => t.length > 0);
+
+// Deduplicate while preserving items as strings
+const userTags = Array.from(new Set(rawTagList));
+
+
+// Determine required count
+const requiredCount = isFirstBatch ? 9 : 6;
+
+// Normalize gifts into consistent shape (coerce types, trim strings)
+const normalizeGift = (gRaw: any) => {
+  const g = gRaw || {};
+
+  const title = (g.title === null || g.title === undefined) ? '' : String(g.title).trim();
+  const description = (g.description === null || g.description === undefined) ? '' : String(g.description).trim();
+
+  const price_min = (g.price_min !== null && g.price_min !== undefined && !Number.isNaN(Number(g.price_min)))
+    ? Math.max(0, Math.round(Number(g.price_min)))
+    : null;
+  const price_max = (g.price_max !== null && g.price_max !== undefined && !Number.isNaN(Number(g.price_max)))
+    ? Math.max(0, Math.round(Number(g.price_max)))
+    : null;
+
+  // Robust match_score coercion:
+  // Accept numbers, numeric strings ("0.85", "85%") and fall back to 0.
+  let rawScore: any = g.match_score;
+  if (rawScore === null || rawScore === undefined) rawScore = 0;
+  // If it's a string containing a percent like "85%", remove % then parse.
+  if (typeof rawScore === 'string' && rawScore.trim().endsWith('%')) {
+    const cleaned = rawScore.trim().replace('%', '');
+    rawScore = cleaned;
+  }
+  // Convert to number safely
+  let match_score_num = Number(rawScore);
+  if (!Number.isFinite(match_score_num)) {
+    // try parsing floats from strings that may contain commas or stray chars
+    const asStr = String(rawScore).replace(/[,₨₹\s]/g, '');
+    match_score_num = Number(asStr);
+  }
+  if (!Number.isFinite(match_score_num)) match_score_num = 0;
+
+  // If model gave percent-like (e.g., 85), normalize to 0..1
+  if (match_score_num > 1) {
+    if (match_score_num <= 100) match_score_num = match_score_num / 100;
+    else match_score_num = match_score_num / 1000; // defensive
+  }
+
+  // Ensure in 0..1 and round to two decimals
+  match_score_num = Math.max(0, Math.min(1, match_score_num));
+  match_score_num = Math.round(match_score_num * 100) / 100;
+
+  const matched_tags = Array.isArray(g.matched_tags)
+    ? g.matched_tags.map((t: any) => (t === null || t === undefined) ? '' : String(t).trim()).filter(Boolean)
+    : [];
+
+  const ai_rationale = (g.ai_rationale === null || g.ai_rationale === undefined) ? '' : String(g.ai_rationale).trim();
+  const vendor = (g.vendor === null || g.vendor === undefined) ? '' : String(g.vendor).trim();
+  const delivery_estimate = (g.delivery_estimate === null || g.delivery_estimate === undefined) ? '' : String(g.delivery_estimate).trim();
+
+  return {
+    __raw: gRaw,
+    title,
+    description,
+    price_min,
+    price_max,
+    match_score: match_score_num,
+    matched_tags,
+    ai_rationale,
+    vendor,
+    delivery_estimate,
+  };
+};
+
+// Tag overlap score uses all userTags; returns 0..1
+function tagOverlapScore(gift: any, userTagsArr: string[]) {
+  if (!userTagsArr || userTagsArr.length === 0) return 0;
+const giftText = [
+  gift.title ?? '',
+  gift.description ?? '',
+  ...(Array.isArray(gift.matched_tags) ? gift.matched_tags : []),
+].map((x: any) => (x === null || x === undefined) ? '' : String(x)).join(' ').toLowerCase();
+  const giftTokens = new Set(tokenize(giftText));
+  let hits = 0;
+  for (const t of userTagsArr) {
+    const tt = (t || '').toString().toLowerCase().trim();
+    if (!tt) continue;
+    // direct token match
+    const ttTokens = tokenize(tt);
+    let matched = false;
+    for (const tok of ttTokens) {
+      if (giftTokens.has(tok) || giftText.includes(tok)) {
+        matched = true;
+        break;
+      }
+    }
+    if (matched) hits++;
+  }
+  return hits / userTagsArr.length; // fraction 0..1
+}
+
+// Budget proximity score: 0..1 (1 if gift within user budget)
+function budgetScore(gift: any, budgetMin: number | undefined, budgetMax: number | undefined) {
+  if (!budgetMin || !budgetMax || !gift.price_min || !gift.price_max) return 0.5; // neutral if missing
+  // within budget if gift range overlaps with [budgetMin, budgetMax]
+  const overlap = Math.max(0, Math.min(gift.price_max, budgetMax) - Math.max(gift.price_min, budgetMin));
+  const giftWidth = Math.max(1, gift.price_max - gift.price_min);
+  // proportion of gift price covered by budget
+  const proportion = overlap / (giftWidth || 1);
+  // if fully inside budget, return 1, else 0.5..0
+  if (gift.price_min >= budgetMin && gift.price_max <= budgetMax) return 1.0;
+  if (proportion > 0) return Math.max(0.3, 0.5 * proportion + 0.5 * 0.5); // somewhat gentle
+  // no overlap
+  return 0.25;
+}
+
+// Compute final score combining model suggestion and server deterministic signals
+function computeFinalScore(gift: any, userTagsArr: string[], budgetMin: number | undefined, budgetMax: number | undefined) {
+  const overlap = tagOverlapScore(gift, userTagsArr);            // 0..1
+  const bScore = budgetScore(gift, budgetMin, budgetMax);       // 0..1
+  // heuristic: hobby 0.35, personality 0.20 (but both appear in tags), occasion 0.15 (approx via description), budget 0.15, vendor/delivery 0.15
+  // We'll combine overlap and budget with modelScore.
+  const modelScore = Number.isFinite(Number(gift.match_score)) ? Number(gift.match_score) : 0;
+  const serverComponent = Math.min(1, Math.max(0, (overlap * 0.8 + bScore * 0.2)));
+  // Weighted blend: server 0.65, model 0.35 (server more authoritative)
+  const final = Math.min(1, Math.max(0, serverComponent * 0.65 + modelScore * 0.35));
+  // Apply small bonuses/penalties (approximate rules from prompt)
+  let adjusted = final;
+  // bonus when overlap is high and budget is good
+  if (overlap >= 0.75 && bScore >= 0.9) adjusted = Math.min(1, adjusted + 0.08);
+  // penalty if gift clearly outside budget
+  if (bScore < 0.3) adjusted = Math.max(0, adjusted - 0.12);
+  // floor padded items later at 0.30
+  // round to two decimals
+  adjusted = Math.round(adjusted * 100) / 100;
+  return adjusted;
+}
+
+function generatePaddedItem(idx: number, userTagsArr: string[], budgetMin: number | undefined, budgetMax: number | undefined) {
+  const tagSource = userTagsArr && userTagsArr.length ? userTagsArr : ['General'];
+  // pick up to 3 tags for initial matched_tags deterministically
+  const tagsForThis = [
+    tagSource[idx % tagSource.length],
+    tagSource[(idx + 1) % tagSource.length],
+    tagSource[(idx + 2) % tagSource.length],
+  ].filter(Boolean).map(t => String(t).trim()).slice(0, 3);
+
+  const defaultMin = budgetMin && budgetMax ? Math.max(100, Math.round((budgetMin + budgetMax) / 3)) : 500;
+  const defaultMax = budgetMin && budgetMax ? Math.max(defaultMin + 200, Math.round((budgetMin + budgetMax) / 2)) : defaultMin + 700;
+  const priceMin = Math.max(100, Math.round(defaultMin));
+  const priceMax = Math.max(priceMin, Math.round(defaultMax));
+  const tagDisplay = tagsForThis.length ? tagsForThis.join(' ') : 'General';
+  const title = `${tagDisplay} Gift Set`;
+  const description = `A thoughtfully selected ${tagDisplay.toLowerCase()} gift that aligns with the recipient's interests. Suitable for the occasion and practical for everyday use.`;
+  const matched_tags = tagsForThis.map((t:any) =>
+    String(t).split(/[\s_-]+/).map((w:string)=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ')
+  );
+  const match_score = 0.45; // conservative padded score
+  const ai_rationale = `Deterministic fallback derived from tags: ${matched_tags.join(', ') || '"General"'}.`;
+  const vendor = 'Local Curated Vendor';
+  const delivery_estimate = requestData.city ? `3-6 working days in ${requestData.city}` : '4-7 working days across India';
+  return {
+    __raw: null,
+    title,
+    description,
+    price_min: priceMin,
+    price_max: priceMax,
+    match_score,
+    matched_tags,
+    ai_rationale,
+    vendor,
+    delivery_estimate,
+  };
+}
+
+// Normalize parsed gifts
+let normalized = aiGifts.map(normalizeGift);
+
+// --- Augment matched_tags deterministically and compute final server-side match_score using ALL user tags ---
+// helper: find best matching userTags for a gift (returns ordered array of user tags that appear in gift text)
+function bestUserTagsForGift(gift: any, userTagsArr: string[]) {
+  const giftText = [gift.title || '', gift.description || '', ...(Array.isArray(gift.matched_tags) ? gift.matched_tags : [])]
+    .map((x:any) => (x === null || x === undefined) ? '' : String(x)).join(' ').toLowerCase();
+  // compute simple relevance score per tag: token overlap + substring match
+  const scores: { tag: string; score: number }[] = userTagsArr.map(t => {
+    const tt = String(t).toLowerCase();
+    const tokens = tt.split(/[^a-z0-9]+/).filter(Boolean);
+    let s = 0;
+    for (const tok of tokens) {
+      if (giftText.includes(tok)) s += 1;
+    }
+    // small bump if exact tag substring present
+    if (tt.length > 0 && giftText.includes(tt)) s += 0.5;
+    return { tag: t, score: s };
+  }).sort((a,b) => b.score - a.score);
+  return scores.filter(x=>x.score>0).map(x=>x.tag);
+}
+
+// Ensure each gift has 3-6 matched_tags — pick best matches from userTags deterministically,
+// falling back to deriving tags from title/description tokens if needed.
+normalized = normalized.map(g => {
+  // ensure matched_tags is array of strings (from model or empty)
+  g.matched_tags = Array.isArray(g.matched_tags) ? g.matched_tags.map((t:any) => String(t).trim()).filter(Boolean) : [];
+
+  // collect best tags for this gift from userTags
+  const best = bestUserTagsForGift(g, userTags);
+
+  // start with model-provided tags (if any) but map to userTags when possible
+  const normalizedTags: string[] = [];
+  // prefer tags that are both model-provided and exist in userTags (or substr match)
+  for (const mt of g.matched_tags) {
+    const mtLow = String(mt).toLowerCase();
+    // find closest user tag
+    const match = userTags.find(ut => String(ut).toLowerCase() === mtLow) || userTags.find(ut => String(ut).toLowerCase().includes(mtLow)) || null;
+    normalizedTags.push(match ? String(match) : String(mt));
+    if (normalizedTags.length >= 6) break;
+  }
+
+  // append best user tags not already present until we have at least 3 tags (or up to 6)
+  for (const ut of best) {
+    if (normalizedTags.length >= 6) break;
+    if (!normalizedTags.map(x => x.toLowerCase()).includes(String(ut).toLowerCase())) normalizedTags.push(ut);
+  }
+
+  // if still <3, add first tokens from title/description (deterministic)
+  if (normalizedTags.length < 3) {
+    const titleTokens = String(g.title || '').split(/\s+/).map((t:any)=>String(t)).filter(Boolean);
+    for (const tk of titleTokens) {
+      if (normalizedTags.length >= 3) break;
+      if (!normalizedTags.map(x=>x.toLowerCase()).includes(String(tk).toLowerCase())) normalizedTags.push(tk);
+    }
+  }
+
+  // final trim to 3-6 items and Title Case them (simple capitalization)
+  const finalTags = normalizedTags.slice(0, 6).map((t:any) => {
+    const s = String(t).trim();
+    return s.split(/[\s_-]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  });
+
+  g.matched_tags = finalTags;
+
+  // compute final score using server logic
+  const finalScore = computeFinalScore(g, userTags, requestData.budget_min, requestData.budget_max);
+  g.match_score = finalScore;
+
+  return g;
+});
+
+// --- Batch-level coverage: ensure distinct user tags are represented across gifts.
+// Greedy: mark which userTags are already covered by gifts; if uncovered tags remain,
+// try to insert them into gifts with lowest penalty (append to matched_tags until 5 tags)
+(function enforceBatchCoverage(arr: any[], userTagsArr: string[]) {
+  const covered = new Set<string>();
+  for (const g of arr) {
+    for (const t of (g.matched_tags || [])) covered.add(String(t).toLowerCase());
+  }
+  const uncovered = userTagsArr.filter(ut => !covered.has(String(ut).toLowerCase()));
+  let gi = 0;
+  for (const ut of uncovered) {
+    if (gi >= arr.length) gi = 0;
+    // try to append to gift where ut isn't present and matched_tags.length < 5
+    // iterate a few times to find a candidate
+    let assigned = false;
+    for (let tries = 0; tries < arr.length && !assigned; tries++, gi = (gi + 1) % arr.length) {
+      const gift = arr[gi];
+      const lowerTags = (gift.matched_tags || []).map((x:any)=>String(x).toLowerCase());
+      if (!lowerTags.includes(String(ut).toLowerCase()) && (gift.matched_tags || []).length < 5) {
+        gift.matched_tags.push(String(ut).split(/[\s_-]+/).map((w:string)=>w.charAt(0).toUpperCase()+w.slice(1)).join(' '));
+        assigned = true;
+      }
+    }
+    gi++;
+  }
+})(normalized, userTags);
+
+// Sort by descending match_score
+normalized.sort((a: any, b: any) => (b.match_score || 0) - (a.match_score || 0));
+
+// Trim or pad to requiredCount deterministically
+if (normalized.length > requiredCount) {
+  normalized = normalized.slice(0, requiredCount);
+} else if (normalized.length < requiredCount) {
+  const toAdd = requiredCount - normalized.length;
+  for (let i = 0; i < toAdd; i++) {
+    const padded = generatePaddedItem(i + normalized.length, userTags, requestData.budget_min, requestData.budget_max);
+    normalized.push(padded);
+  }
+}
+
+(function augmentPaddedItems(arr: any[], userTagsArr: string[]) {
+  // reuse helper bestUserTagsForGift (already defined above)
+  for (const g of arr) {
+    // if gift already has 3+ tags, skip
+    if (Array.isArray(g.matched_tags) && g.matched_tags.length >= 3) continue;
+
+    // build normalizedTags using same logic as earlier
+    const existing = Array.isArray(g.matched_tags) ? g.matched_tags.map((t:any)=>String(t).trim()).filter(Boolean) : [];
+    const best = bestUserTagsForGift(g, userTagsArr);
+
+    const normalizedTags: string[] = [...existing];
+
+    for (const ut of best) {
+      if (normalizedTags.length >= 6) break;
+      if (!normalizedTags.map(x => x.toLowerCase()).includes(String(ut).toLowerCase())) normalizedTags.push(ut);
     }
 
-    aiGifts = parsed;
+    if (normalizedTags.length < 3) {
+      const titleTokens = String(g.title || '').split(/\s+/).map((t:any)=>String(t)).filter(Boolean);
+      for (const tk of titleTokens) {
+        if (normalizedTags.length >= 3) break;
+        if (!normalizedTags.map(x=>x.toLowerCase()).includes(String(tk).toLowerCase())) normalizedTags.push(tk);
+      }
+    }
+
+    g.matched_tags = normalizedTags.slice(0, 6).map((t:any) => {
+      const s = String(t).trim();
+      return s.split(/[\s_-]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    });
+  }
+
+  // re-run greedy batch coverage to distribute any remaining uncovered tags
+  (function enforceBatchCoverageAgain(arr2: any[], userTags2: string[]) {
+    const covered = new Set<string>();
+    for (const g of arr2) {
+      for (const t of (g.matched_tags || [])) covered.add(String(t).toLowerCase());
+    }
+    const uncovered = userTags2.filter(ut => !covered.has(String(ut).toLowerCase()));
+    let gi = 0;
+    for (const ut of uncovered) {
+      if (gi >= arr2.length) gi = 0;
+      let assigned = false;
+      for (let tries = 0; tries < arr2.length && !assigned; tries++, gi = (gi + 1) % arr2.length) {
+        const gift = arr2[gi];
+        const lowerTags = (gift.matched_tags || []).map((x:any)=>String(x).toLowerCase());
+        if (!lowerTags.includes(String(ut).toLowerCase()) && (gift.matched_tags || []).length < 5) {
+          gift.matched_tags.push(String(ut).split(/[\s_-]+/).map((w:string)=>w.charAt(0).toUpperCase()+w.slice(1)).join(' '));
+          assigned = true;
+        }
+      }
+      gi++;
+    }
+  })(arr, userTagsArr);
+
+})(normalized, userTags);
+
+// Ensure padded items have at least floor score 0.30
+normalized = normalized.map((g: any) => {
+  if (!Number.isFinite(g.match_score)) g.match_score = 0.30;
+  if (g.match_score < 0.30) g.match_score = 0.30;
+  // round to two decimals if not already
+  g.match_score = Math.round(Number(g.match_score) * 100) / 100;
+  return g;
+});
+
+// Replace aiGifts with normalized final array
+aiGifts = normalized;
+
+// Log if padding was used to aid debugging
+try {
+  const paddedCount = aiGifts.filter((g:any) => (g.__raw === null)).length;
+  if (paddedCount > 0) console.log(`Used ${paddedCount} padded fallback gifts to reach required count (${requiredCount}).`);
+} catch (e) {}
+
+// -------------------- END normalization/scoring/enforcement --------------------
+
 
 
     // FRONTEND_BASE_URL for buy links
@@ -915,7 +1134,7 @@ let giftsText: string | null = null;
     // Enrich gifts with images, insert into DB and update buy_link
     const enrichedGifts = await Promise.all(
       aiGifts.map(async (gift: any) => {
-        const imageUrls = await fetchGiftImage(supabaseAdmin, gift.title, gift.matched_tags || []);
+        const imageUrls = await fetchGiftImage(supabaseAdmin, gift.title, userTags || gift.matched_tags || []);
         const images = imageUrls || {
           raw: getFallbackImage(gift.matched_tags || []),
           regular: getFallbackImage(gift.matched_tags || []),

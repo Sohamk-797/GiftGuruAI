@@ -1,4 +1,3 @@
-// src/components/SearchHistory.tsx
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,13 +36,13 @@ export const SearchHistory = ({ history, onLoadSearch, onDeleteSearch }: SearchH
 
       <CardContent className="space-y-3">
         {history.slice(0, 5).map((item) => {
-          // Defensive access of fields that may be missing or null
           const id = item?.id ?? "";
           const nameLabel = item?.name ? `${item.name}'s Gift` : "Gift Search";
           const relation = item?.relation ?? "—";
           const occasion = item?.occasion ?? "—";
           const age = typeof item?.age === "number" ? item.age : undefined;
-          const hobbies = Array.isArray(item?.hobbies) ? item.hobbies : [];
+          const hobbies = Array.isArray(item?.hobbies) ? item.hobbies.map((h: any) => String(h).trim()).filter(Boolean) : [];
+          const personalities = Array.isArray(item?.personalities) ? item.personalities.map((p: any) => String(p).trim()).filter(Boolean) : [];
           const budgetMin = typeof item?.budget_min === "number" ? item.budget_min : undefined;
           const budgetMax =
             typeof item?.budget_max === "number" ? item.budget_max : budgetMin ?? undefined;
@@ -64,7 +63,6 @@ export const SearchHistory = ({ history, onLoadSearch, onDeleteSearch }: SearchH
             try {
               onLoadSearch(item);
             } catch (e) {
-              // noop - defensive
               console.error("Failed to load search item", e);
             }
           };
@@ -111,7 +109,7 @@ export const SearchHistory = ({ history, onLoadSearch, onDeleteSearch }: SearchH
 
                 <div className="flex items-center gap-1 flex-wrap">
                   {hobbies.slice(0, 3).map((hobby, idx) => (
-                    <Badge key={idx} variant="outline" className="text-xs">
+                    <Badge key={`h-${idx}-${hobby}`} variant="outline" className="text-xs">
                       {hobby}
                     </Badge>
                   ))}
@@ -119,6 +117,19 @@ export const SearchHistory = ({ history, onLoadSearch, onDeleteSearch }: SearchH
                     <span className="text-xs text-muted-foreground">+{hobbies.length - 3} more</span>
                   )}
                 </div>
+
+                {personalities.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                    {personalities.slice(0, 3).map((p, idx) => (
+                      <Badge key={`p-${idx}-${p}`} variant="outline" className="text-xs">
+                        {p}
+                      </Badge>
+                    ))}
+                    {personalities.length > 3 && (
+                      <span className="text-xs text-muted-foreground">+{personalities.length - 3} more</span>
+                    )}
+                  </div>
+                )}
 
                 <p className="text-xs text-muted-foreground">
                   {createdAtText}

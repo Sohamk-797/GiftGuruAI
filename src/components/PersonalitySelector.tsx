@@ -7,12 +7,20 @@ interface PersonalitySelectorProps {
   onChange: (traits: string[]) => void;
 }
 
+const normalizeTag = (t: string) => String(t || "").trim();
+
 export const PersonalitySelector = ({ selectedTraits, onChange }: PersonalitySelectorProps) => {
+  // case-insensitive presence check
+  const hasTrait = (arr: string[], trait: string) =>
+    arr.some(t => normalizeTag(t).toLowerCase() === normalizeTag(trait).toLowerCase());
+
   const toggleTrait = (trait: string) => {
-    if (selectedTraits.includes(trait)) {
-      onChange(selectedTraits.filter(t => t !== trait));
+    const n = normalizeTag(trait);
+    if (!n) return;
+    if (hasTrait(selectedTraits, n)) {
+      onChange(selectedTraits.filter(t => normalizeTag(t).toLowerCase() !== n.toLowerCase()));
     } else {
-      onChange([...selectedTraits, trait]);
+      onChange([...selectedTraits, n]);
     }
   };
 
@@ -38,7 +46,7 @@ export const PersonalitySelector = ({ selectedTraits, onChange }: PersonalitySel
         {PERSONALITY_TRAITS.map((trait) => (
           <Badge
             key={trait}
-            variant={selectedTraits.includes(trait) ? "default" : "outline"}
+            variant={hasTrait(selectedTraits, trait) ? "default" : "outline"}
             className="cursor-pointer transition-all hover:scale-105 bg-card"
             onClick={() => toggleTrait(trait)}
           >

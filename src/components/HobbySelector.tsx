@@ -11,29 +11,39 @@ interface HobbySelectorProps {
   onChange: (hobbies: string[]) => void;
 }
 
+const normalizeTag = (t: string) => String(t || "").trim();
+
 export const HobbySelector = ({ selectedHobbies, onChange }: HobbySelectorProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [customHobby, setCustomHobby] = useState("");
 
+  // helpers: case-insensitive contains
+  const hasTag = (arr: string[], tag: string) =>
+    arr.some(t => normalizeTag(t).toLowerCase() === normalizeTag(tag).toLowerCase());
+
   const toggleHobby = (hobby: string) => {
-    if (selectedHobbies.includes(hobby)) {
-      onChange(selectedHobbies.filter(h => h !== hobby));
+    const n = normalizeTag(hobby);
+    if (!n) return;
+    if (hasTag(selectedHobbies, n)) {
+      onChange(selectedHobbies.filter(h => normalizeTag(h).toLowerCase() !== n.toLowerCase()));
     } else {
-      onChange([...selectedHobbies, hobby]);
+      onChange([...selectedHobbies, n]);
     }
   };
 
   const addCustomHobby = () => {
-    if (customHobby && !selectedHobbies.includes(customHobby)) {
-      onChange([...selectedHobbies, customHobby]);
-      setCustomHobby("");
+    const n = normalizeTag(customHobby);
+    if (!n) return;
+    if (!hasTag(selectedHobbies, n)) {
+      onChange([...selectedHobbies, n]);
     }
+    setCustomHobby("");
   };
 
   const allHobbies = Object.values(HOBBY_CATEGORIES).flat();
   const filteredHobbies = searchTerm
     ? allHobbies.filter(h => h.toLowerCase().includes(searchTerm.toLowerCase()))
-    : null;
+    : allHobbies;
 
   return (
     <div className="space-y-4">
@@ -64,40 +74,27 @@ export const HobbySelector = ({ selectedHobbies, onChange }: HobbySelectorProps)
       )}
 
       <ScrollArea className="h-[300px] rounded-lg border border-border p-4 bg-card">
-        {filteredHobbies ? (
-          <div className="flex flex-wrap gap-2">
-            {filteredHobbies.map((hobby) => (
-              <Badge
-                key={hobby}
-                variant={selectedHobbies.includes(hobby) ? "default" : "outline"}
-                className="cursor-pointer transition-all hover:scale-105"
-                onClick={() => toggleHobby(hobby)}
-              >
-                {hobby}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {Object.entries(HOBBY_CATEGORIES).map(([category, hobbies]) => (
-              <div key={category} className="space-y-2">
-                <h4 className="text-sm font-semibold text-foreground">{category}</h4>
-                <div className="flex flex-wrap gap-2">
-                  {hobbies.map((hobby) => (
+        <div className="space-y-6">
+          {Object.entries(HOBBY_CATEGORIES).map(([category, hobbies]) => (
+            <div key={category} className="space-y-2">
+              <h4 className="text-sm font-semibold text-foreground">{category}</h4>
+              <div className="flex flex-wrap gap-2">
+                {hobbies
+                  .filter(h => filteredHobbies.includes(h))
+                  .map((hobby) => (
                     <Badge
                       key={hobby}
-                      variant={selectedHobbies.includes(hobby) ? "default" : "outline"}
+                      variant={hasTag(selectedHobbies, hobby) ? "default" : "outline"}
                       className="cursor-pointer transition-all hover:scale-105"
                       onClick={() => toggleHobby(hobby)}
                     >
                       {hobby}
                     </Badge>
                   ))}
-                </div>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          ))}
+        </div>
       </ScrollArea>
 
       <div className="flex gap-2">
@@ -105,7 +102,7 @@ export const HobbySelector = ({ selectedHobbies, onChange }: HobbySelectorProps)
           placeholder="Add custom hobby..."
           value={customHobby}
           onChange={(e) => setCustomHobby(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && addCustomHobby()}
+          onKeyDown={(e) => e.key === 'Enter' && addCustomHobby()}
           className="bg-card border-border"
         />
         <Button onClick={addCustomHobby} variant="outline">

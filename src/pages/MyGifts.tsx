@@ -1,5 +1,3 @@
-// REPLACE ENTIRE FILE WITH THIS
-// src/pages/MyGifts.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -36,8 +34,6 @@ const MyGifts = () => {
       }
 
       const userId = session.user.id;
-
-      // Use a relaxed-typed supabase client to avoid generated types mismatch for "favorites"
       const sb: any = supabase as any;
 
       // 1) fetch favorite gift ids for this user
@@ -55,13 +51,11 @@ const MyGifts = () => {
       const giftIds = favData.map((r: any) => r.gift_id).filter(Boolean) as string[];
 
       if (!giftIds || giftIds.length === 0) {
-        // no favorites — clear list
         setGifts([]);
         return;
       }
 
       // 2) fetch gifts with those ids
-      // Use sb for this request as well if your generated "gifts" types are causing issues.
       const giftsResp: any = await sb
         .from("gifts")
         .select("*")
@@ -75,7 +69,16 @@ const MyGifts = () => {
 
       const giftsData: any[] = Array.isArray(giftsResp?.data) ? giftsResp.data : [];
 
-      const transformedGifts: Gift[] = giftsData.map((gift: any) => ({
+      // Build lookup map for deterministic ordering (preserve favorite order)
+      const giftsById: Record<string, any> = {};
+      for (const g of giftsData) {
+        if (g && g.id) giftsById[g.id] = g;
+      }
+
+      // Map back to original giftIds order to be deterministic, filter missing entries
+      const orderedGifts = giftIds.map(id => giftsById[id]).filter(Boolean);
+
+      const transformedGifts: Gift[] = orderedGifts.map((gift: any) => ({
         id: gift.id,
         title: gift.title,
         description: gift.description,
