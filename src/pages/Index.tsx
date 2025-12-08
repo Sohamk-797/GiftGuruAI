@@ -200,182 +200,111 @@ const Index = ({ session }: IndexProps) => {
     navigate("/");
   };
 
-    const getSuggestions = async (append = false) => {const getSuggestions = async (append = false) => {
-      // How many gifts the UI must show on a fresh (non-append) search
-      const REQUIRED_FIRST_BATCH = 9;
+    const getSuggestions = async (append = false) => {
+    if (!session) {
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to generate gift suggestions.",
+        variant: "destructive",
+      });
+      navigate("/");
+      return;
+    }
 
-      if (!session) {
-        toast({
-          title: "Please sign in",
-          description: "You need to be signed in to generate gift suggestions.",
-          variant: "destructive",
-        });
-        navigate("/");
-        return;
-      }
+    // Prevent duplicate requests
+    if (loading) return;
 
-      // Prevent duplicate requests
-      if (loading) return;
+    setLoading(true);
+    try {
+      // Forward user's JWT (access_token) to the Edge Function
+      const authHeader = session.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+            // supabase.functions.invoke accepts headers in the options object
+      // Make sure we send a JSON string body — Edge function expects valid JSON
+      const requestBody = JSON.stringify({ ...formData, offset: append ? gifts.length : 0 });
 
-      setLoading(true);
-      try {
-        // Forward user's JWT (access_token) to the Edge Function
-        const authHeader = session.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+      const { data, error } = await supabase.functions.invoke('suggest-gifts', {
+        body: requestBody,
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+      });
 
-        // Build explicit request body to guarantee full arrays are sent
-        const requestPayload = {
-          name: formData.name || "",
-          age: typeof formData.age === "number" ? formData.age : undefined,
-          relation: formData.relation || "",
-          occasion: formData.occasion || "",
-          budget_min: typeof formData.budget_min === "number" ? formData.budget_min : undefined,
-          budget_max: typeof formData.budget_max === "number" ? formData.budget_max : undefined,
-          // Ensure arrays are passed intact
-          hobbies: Array.isArray(formData.hobbies) ? formData.hobbies : [],
-          personalities: Array.isArray(formData.personalities) ? formData.personalities : [],
-          city: formData.city || "",
-          // offset: 0 for fresh search; for append use current known count
-          offset: append ? gifts.length : 0,
-        };
+      // The Supabase client may surface errors in `error` or via non-2xx responses.
+      if (error) throw error;
 
-        const { data, error } = await supabase.functions.invoke("suggest-gifts", {
-          body: JSON.stringify(requestPayload),
-          headers: { ...authHeader, "Content-Type": "application/json" },
-        });
-
-        if (error) throw error;
-
-        // Normalize function response: SDK may return parsed objects or raw strings
-        let payload: any = data;
-        if (typeof payload === "string") {
-          try {
-            payload = JSON.parse(payload);
-          } catch (parseErr) {
-            console.warn("Failed to parse function response string", parseErr);
-          }
-        }
-
-        // Prefer a real array at payload.gifts
-        const serverGifts: any[] = (payload && Array.isArray(payload.gifts)) ? payload.gifts : [];
-
-        // If this is a fresh (non-append) search, we want exactly REQUIRED_FIRST_BATCH displayed.
-        let newGifts: any[] = [];
-
-        if (!append) {
-          // Take up to REQUIRED_FIRST_BATCH from server
-          newGifts = serverGifts.slice(0, REQUIRED_FIRST_BATCH);
-
-          // If server returned fewer, deterministically pad client-side using user's tags & budget
-          if (newGifts.length < REQUIRED_FIRST_BATCH) {
-            const toAdd = REQUIRED_FIRST_BATCH - newGifts.length;
-            const userTags = [
-              ...(Array.isArray(formData.hobbies) ? formData.hobbies : []),
-              ...(Array.isArray(formData.personalities) ? formData.personalities : []),
-            ].map(t => (t === null || t === undefined) ? "" : String(t)).filter(Boolean);
-
-            const makePadded = (idx: number) => {
-              const tag = userTags.length ? userTags[idx % userTags.length] : "Gift";
-              const defaultMin = (typeof formData.budget_min === "number" && typeof formData.budget_max === "number")
-                ? Math.max(100, Math.round((formData.budget_min + formData.budget_max) / 3))
-                : 500;
-              const defaultMax = (typeof formData.budget_min === "number" && typeof formData.budget_max === "number")
-                ? Math.max(defaultMin + 200, Math.round((formData.budget_min + formData.budget_max) / 2))
-                : defaultMin + 700;
-
-              return {
-                // Mark padded items so you can detect them in UI or analytics if needed
-                __client_padded: true,
-                id: `padded-${Date.now()}-${idx}`,
-                title: `${String(tag).split(/\s+/)[0]} Gift Set`,
-                description: `A thoughtfully-selected ${String(tag).toLowerCase()} gift that aligns with the recipient's interests.`,
-                price_min: defaultMin,
-                price_max: defaultMax,
-                match_score: 0.45,
-                matched_tags: [
-                  String(tag)
-                    .split(/[\s_-]+/)
-                    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-                    .join(" "),
-                ],
-                ai_rationale: `Deterministic fallback derived from tag "${tag}".`,
-                delivery_estimate: formData.city ? `3-6 working days in ${formData.city}` : "4-7 working days across India",
-                vendor: "Local Curated Vendor",
-                images: null,
-              };
-            };
-
-            for (let i = 0; i < toAdd; i++) newGifts.push(makePadded(i));
-          }
-        } else {
-          // append behavior: append whatever valid items the server returned (no padding)
-          newGifts = Array.isArray(serverGifts) ? serverGifts : [];
-        }
-
-        // Update state and sessionStorage
-        if (append) {
-          setGifts(prev => {
-            const updated = [...prev, ...newGifts];
-            sessionStorage.setItem("giftguru:last_suggestions", JSON.stringify(updated));
-            return updated;
-          });
-        } else {
-          setGifts(newGifts);
-          sessionStorage.setItem("giftguru:last_suggestions", JSON.stringify(newGifts));
-          // Save search only when we actually got result(s)
-          if (newGifts && newGifts.length > 0) {
-            await saveSearch(newGifts);
-          }
-        }
-
-        setStep(5);
-
-        if (!append && newGifts.length > 0) {
-          toast({
-            title: "Perfect matches found!",
-            description: `We found ${newGifts.length} great gift options for you.`,
-          });
-        } else if (!append && newGifts.length === 0) {
-          toast({
-            title: "No matches",
-            description: "No exact matches found — we returned alternatives.",
-          });
-        }
-      } catch (error: any) {
-        console.error("Error getting suggestions:", error);
-
-        let message = "Failed to get gift suggestions. Please try again.";
+      // Normalize function response: some SDKs return parsed objects, others raw strings
+      let payload: any = data;
+      if (typeof payload === 'string') {
         try {
-          if (error?.data) {
-            const serverData = typeof error.data === "string"
-              ? (() => { try { return JSON.parse(error.data); } catch { return null; } })()
-              : error.data;
-            if (serverData?.error?.message) {
-              message = serverData.error.message;
-              if (serverData.error.details) message += ` — ${serverData.error.details}`;
-            } else if (serverData?.error) {
-              message = typeof serverData.error === "string" ? serverData.error : JSON.stringify(serverData.error);
-            } else if (serverData?.message) {
-              message = serverData.message;
-            }
-          } else if (error?.message && typeof error.message === "string") {
-            message = error.message;
-          } else if (error?.status) {
-            message = `Server Error: ${error.status}`;
-          }
-        } catch (e) {
-          message = error?.message || message;
+          payload = JSON.parse(payload);
+        } catch (parseErr) {
+          // If parse fails, just warn and keep payload as-is; we'll treat missing gifts gracefully below
+          console.warn('Failed to parse function response string', parseErr);
         }
-
-        toast({
-          title: "Error",
-          description: message,
-          variant: "destructive",
-        });
-      } finally {
-        setLoading(false);
       }
-    };
+      const newGifts = (payload && payload.gifts) ? payload.gifts : [];
+
+      if (append) {
+        setGifts(prev => {
+          const updated = [...prev, ...newGifts];
+          sessionStorage.setItem("giftguru:last_suggestions", JSON.stringify(updated));
+          return updated;
+        });
+      } else {
+        setGifts(newGifts);
+        sessionStorage.setItem("giftguru:last_suggestions", JSON.stringify(newGifts));
+        // Save search only when we actually got result(s)
+        await saveSearch(newGifts);
+      }
+
+      setStep(5);
+
+      if (!append && newGifts.length > 0) {
+        toast({
+          title: "Perfect matches found!",
+          description: `We found ${newGifts.length} great gift options for you.`,
+        });
+      } else if (!append && newGifts.length === 0) {
+        toast({
+          title: "No matches",
+          description: "No exact matches found — we returned alternatives.",
+        });
+      }
+        } catch (error: any) {
+      console.error('Error getting suggestions:', error);
+
+      // Prefer server-provided structured error message when available.
+      let message = 'Failed to get gift suggestions. Please try again.';
+      try {
+        // Supabase SDK sometimes puts server response in error.data or error.message
+        if (error?.data) {
+          const serverData = typeof error.data === 'string' ? (() => { try { return JSON.parse(error.data); } catch { return null; } })() : error.data;
+          if (serverData?.error?.message) {
+            message = serverData.error.message;
+            if (serverData.error.details) message += ` — ${serverData.error.details}`;
+          } else if (serverData?.error) {
+            message = typeof serverData.error === 'string' ? serverData.error : JSON.stringify(serverData.error);
+          } else if (serverData?.message) {
+            message = serverData.message;
+          }
+        } else if (error?.message && typeof error.message === 'string') {
+          message = error.message;
+        } else if (error?.status) {
+          message = `Server Error: ${error.status}`;
+        }
+      } catch (e) {
+        // fallback
+        message = error?.message || message;
+      }
+
+      toast({
+        title: "Error",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
 
   // Redirect to auth if not signed in
   useEffect(() => {
