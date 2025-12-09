@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ import MyGifts from "./pages/MyGifts";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import Home from "./pages/Home";
 
 const queryClient = new QueryClient();
 
@@ -53,13 +54,16 @@ const AnimatedRoutes = ({ session }: { session: Session | null }) => {
         className="min-h-screen"
       >
         <Routes location={location}>
-          <Route path="/" element={<Auth />} />
+          <Route
+            path="/"
+            element={session ? <Navigate to="/home" replace /> : <Auth />}
+          />
+          <Route path="/home" element={<Home session={session} />} />
           <Route path="/search" element={<Index session={session} />} />
           <Route path="/my-gifts" element={<MyGifts />} />
           <Route path="/gift/:id" element={<GiftDetail />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </motion.div>

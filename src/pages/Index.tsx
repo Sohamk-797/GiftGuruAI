@@ -331,18 +331,11 @@ const Index = ({ session }: IndexProps) => {
               <GiftIcon className="mr-2 h-4 w-4" />
               My Gifts
             </Button>
-            <Button
-              onClick={() => navigate("/privacy")}
-              variant="outline"
-              size="sm"
-              className="btn-hover-lift bg-card/80 backdrop-blur-md border-border/50"
-            >
-              Privacy Policy
-            </Button>
+            
             <Button
               onClick={handleSignOut}
-              variant="outline"
-              size="icon"
+              variant="signout"
+              size="sm"
               className="btn-hover-lift bg-card/80 backdrop-blur-md border-border/50"
               aria-label="Sign out"
             >

@@ -15,6 +15,7 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:shadow-card hover:scale-105 active:scale-95",
         ghost: "hover:bg-accent hover:text-accent-foreground hover:scale-105 active:scale-95",
         link: "text-primary underline-offset-4 hover:underline hover:text-primary/80",
+        signout: "bg-gradient-to-r from-red-500 to-red-600 text-white hover:from-red-500 hover:to-red-700 btn-hover-shine focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-40 rounded-lg px-6 py-2.5 text-sm font-medium shadow-sm hover:scale-103 active:scale-95 transition-all duration-200 ease-in-out"
       },
       size: {
         default: "h-10 px-4 py-2",
