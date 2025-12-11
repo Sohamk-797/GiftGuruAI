@@ -56,7 +56,7 @@ const AnimatedRoutes = ({ session }: { session: Session | null }) => {
         <Routes location={location}>
           <Route
             path="/"
-            element={session ? <Navigate to="/home" replace /> : <Auth />}
+            element={session ? <Navigate to="/" replace /> : <Auth />}
           />
           <Route path="/home" element={<Home session={session} />} />
           <Route path="/search" element={<Index session={session} />} />
