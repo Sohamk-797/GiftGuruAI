@@ -106,7 +106,7 @@ const Home = ({ session }: HomeProps) => {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    navigate("/");
+    navigate("/auth");
   };
 
   return (
