@@ -49,7 +49,7 @@ const Auth = () => {
           title: "Welcome to GiftGuru!",
           description: "You're all set to find perfect gifts.",
         });
-        navigate("/search");
+        navigate("/home");
       }
     });
 
@@ -59,7 +59,8 @@ const Auth = () => {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
-      const redirectUrl = `${window.location.origin}/search`;
+      const redirectUrl = `/home`;
+      // const redirectUrl = `${window.location.origin}/search`;
       
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
