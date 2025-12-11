@@ -124,6 +124,9 @@ const Auth = () => {
           >
             Find a gift they'll actually love — powered by AI
           </motion.p>
+          <Button onClick={() => navigate("/privacy")} variant="link">Privacy Policy</Button>
+          <Button onClick={() => navigate("/terms")} variant="link">Terms of Service</Button>
+
         </motion.div>
 
         {/* Features */}
@@ -229,8 +232,6 @@ const Auth = () => {
             <Star className="h-4 w-4 text-primary" />
             Your gift suggestions are private and saved to your account
           </p>
-          <Button className="mt-3" onClick={() => navigate("/privacy")} variant="link">Privacy Policy</Button>
-          <Button onClick={() => navigate("/terms")} variant="link">Terms of Service</Button>
         </motion.div>
       </div>
     </div>
