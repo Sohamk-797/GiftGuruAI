@@ -6,125 +6,302 @@
 ## Architecture
 
 ### Frontend Stack
-- **Framework**: React 18 + TypeScript + Vite
+- **Framework**: React 18 + TypeScript + Vite (dev server: `localhost:8080`)
 - **UI Components**: shadcn/ui (Radix UI primitives + Tailwind CSS)
-- **Routing**: React Router v6
+- **Routing**: React Router v6 with AnimatePresence for page transitions
 - **Data Fetching**: TanStack React Query
 - **Styling**: Tailwind CSS with animations (Framer Motion)
 - **Forms**: React Hook Form + Zod validation
 - **Toast/Notifications**: Sonner + Radix Toast
 
 ### Backend Stack
-- **Database**: Supabase PostgreSQL
-- **Edge Functions**: Deno (Supabase Functions at `supabase/functions/suggest-gifts/index.ts`)
-- **Auth**: Supabase Auth (OAuth + email/password)
-- **AI API**: Google API (Gemini or similar) for gift suggestions
-- **Image Provider**: Unsplash API with caching
+- **Database**: Supabase PostgreSQL with RLS policies
+- **Edge Functions**: Deno runtime at `supabase/functions/suggest-gifts/index.ts` (1251 lines)
+- **Auth**: Supabase Auth (Google OAuth + email/password dual support)
+- **AI Model**: Google Gemini 2.5 Flash Lite (`gemini-2.5-flash-lite`) for gift generation
+- **Image Provider**: Unsplash API with database caching (`gift_image_cache` table)
 
 ### Key Data Flows
-1. **Gift Suggestion Flow**: User submits preferences (home → edge function) → AI generates suggestions → Results stored in `sessionStorage` → Detail pages fetch from session/DB
-2. **Image Caching**: Edge function queries `gift_image_cache` table → if miss, fetches from Unsplash → caches result for future requests
-3. **Search History**: Tracked in `search_history` table (user-specific + global for trending)
+1. **Gift Suggestion Flow**: 
+   - User submits preferences → `POST /suggest-gifts` edge function
+   - Edge function builds AI prompt → Gemini API generates JSON array of gifts
+   - **5-level JSON recovery** handles malformed responses (lines 650-750)
+   - Results stored in `sessionStorage` key `giftguru:last_suggestions`
+   - Detail pages read from sessionStorage (future: migrate to DB)
+   
+2. **Image Caching**: 
+   - Edge function queries `gift_image_cache` table by search key
+   - Cache key format: `{gift_title}_{tag1}_{tag2}_{tag3}` (normalized, lowercase, max 200 chars)
+   - On miss: Unsplash API → cache result → return 4 sizes (thumb/small/regular/raw)
+   
+3. **Search History**: 
+   - Tracked in `search_history` table with RLS policies
+   - Users see own history + global (anonymized) trending searches
+   - Auth session managed globally in `App.tsx` via `onAuthStateChange`
 
 ## Critical Patterns & Conventions
 
 ### Component Organization
-- **Pages** (`src/pages/`): Full-page route components (Home, GiftDetail, Auth, MyGifts)
-- **Components** (`src/components/`): Reusable UI components and features
-- **UI Primitives** (`src/components/ui/`): Shadcn components (auto-generated, don't modify directly)
+- **Pages** (`src/pages/`): Route components - Home, GiftDetail, Auth, MyGifts, Index
+- **Components** (`src/components/`): Feature components (BudgetSlider, HobbySelector, SearchHistory)
+- **UI Primitives** (`src/components/ui/`): Shadcn auto-generated (never modify directly; use `npx shadcn-ui add`)
+- **Path Alias**: `@/` resolves to `src/` (configured in `vite.config.ts`)
 
-### Data Types
-- Core gift data in `src/types/gift.ts`: `Gift` interface with `GiftImages`, `GiftRequest`
-- Hobby/Personality options as exported constants (e.g., `HOBBY_CATEGORIES`, `RELATIONS`, `OCCASIONS`)
-- Supabase types auto-generated to `src/integrations/supabase/types.ts` (don't commit changes)
+### Data Types & Constants
+- Core types in `src/types/gift.ts`: `Gift`, `GiftImages`, `GiftRequest`
+- Exported constants: `HOBBY_CATEGORIES`, `RELATIONS`, `OCCASIONS`, `PERSONALITY_TRAITS`
+- Supabase types: `src/integrations/supabase/types.ts` (auto-generated, don't edit or commit)
+- Edge function types: `supabase/functions/suggest-gifts/types.d.ts`
 
 ### Supabase Integration
-- Client setup at `src/integrations/supabase/client.ts` (auto-generated)
-- RLS policies on `search_history` and other tables (check migrations)
-- Edge Function authentication: uses SUPABASE_SERVICE_ROLE_KEY for admin operations
+- **Client**: `src/integrations/supabase/client.ts` (auto-generated, don't edit)
+- **RLS Policies**: User-scoped policies on `favorites`, `search_history`, `gifts` tables
+  - Users see only their own data via `auth.uid() = user_id` checks
+  - See `20251205_fix_search_history_rls.sql` for pattern examples
+- **Edge Function Auth**: 
+  - Frontend sends JWT in `Authorization` header
+  - Edge function validates via `validateAuthToken()` helper (~line 150)
+  - Admin operations use `SUPABASE_SERVICE_ROLE_KEY` for RLS bypass
+- **SECURITY DEFINER Warning**: Never use `SECURITY DEFINER` on views; it breaks RLS (see migration `20251230_fix_security_definer_view.sql`)
 
 ### Environment Variables
-**Frontend** (Vite):
-- `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `VITE_FRONTEND_BASE_URL` (for share links and SEO, falls back to `window.location.origin` in dev)
+**Frontend** (`.env` with `VITE_` prefix):
+```bash
+VITE_SUPABASE_URL=https://xxx.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=eyJhb...
+VITE_FRONTEND_BASE_URL=https://gift-guru-ai.vercel.app  # For share URLs; falls back to window.location.origin
+```
 
-**Backend** (Deno Edge Function secrets):
-- `AI_API_KEY` (Google API)
-- `UNSPLASH_ACCESS_KEY` (image provider)
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
-- `FRONTEND_ALLOWED_ORIGINS` (CORS, CSV format or single URL)
+**Backend** (Supabase Edge Function secrets - set in Dashboard → Functions → Settings):
+```bash
+AI_API_KEY=AIzaSyC...           # Google Gemini API key (REQUIRED)
+UNSPLASH_ACCESS_KEY=...         # Unsplash API key (REQUIRED)
+SUPABASE_URL=https://...        # Auto-injected by Supabase
+SUPABASE_SERVICE_ROLE_KEY=...   # Auto-injected (admin bypass)
+SUPABASE_ANON_KEY=...           # Auto-injected (public client)
+FRONTEND_ALLOWED_ORIGINS=https://gift-guru-ai.vercel.app,http://localhost:8080  # CORS (CSV or single URL)
+```
 
 ## Developer Workflows
 
 ### Local Development
 ```bash
 npm install
-npm run dev
-# Runs Vite dev server on http://localhost:8080
-# Supabase local setup (if needed): supabase start
+npm run dev  # Vite dev server on http://localhost:8080
+# Supabase local (optional): supabase start
 ```
 
+**Critical**: Set `.env` file with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` before running dev server.
+
 ### Build & Deployment
-- **Build**: `npm run build` (production) or `npm run build:dev` (dev mode with sourcemaps)
-- **Preview**: `npm run preview` (test production build locally)
-- **Linting**: `npm run lint` (ESLint with React/Hooks rules)
-- **Deployment**: Vercel (auto-deploy on push, see `vercel.json` config)
+```bash
+npm run build         # Production build (minified, no sourcemaps)
+npm run build:dev     # Dev build (with sourcemaps for debugging)
+npm run preview       # Test production build locally (port 4173)
+npm run lint          # ESLint with React/Hooks rules
+```
+
+**Deployment**: Vercel auto-deploys on push. Config in `vercel.json`:
+- Static build via `@vercel/static-build`
+- SPA routing: all routes → `/index.html`
+- Asset caching: `max-age=31536000` for `assets/`, `favicon.ico`, etc.
 
 ### Database Migrations
-- Migrations in `supabase/migrations/` (timestamp-prefixed SQL files)
-- Apply with: `supabase migration up` or auto-applied on Vercel deployments
-- Check `20251205_fix_search_history_rls.sql` for RLS pattern examples
+```bash
+# Create migration
+supabase migration new <description>
+
+# Apply migrations locally
+supabase migration up
+
+# Migrations auto-applied on Vercel deployment
+```
+
+**Pattern**: See `20251205_fix_search_history_rls.sql` for user-scoped RLS policies. Always test RLS with `auth.uid()` in policies, never use public policies for user data.
 
 ### Edge Function Development
-- Located at `supabase/functions/suggest-gifts/index.ts` (Deno runtime)
-- Handles: gift suggestion logic + image caching + AI API calls
-- Deploy with: `supabase functions deploy` or auto via Vercel
-- Type definitions in `supabase/functions/suggest-gifts/types.d.ts`
+**Location**: `supabase/functions/suggest-gifts/index.ts` (1251 lines, Deno runtime)
+
+**Key responsibilities**:
+1. **AI gift generation** (Gemini API with 5-level JSON recovery, lines 650-750)
+2. **Image caching** (`fetchGiftImage()` function with Unsplash integration)
+3. **Auth validation** (`validateAuthToken()` helper, ~line 150)
+4. **CORS handling** (stored in outer scope, reused in error responses)
+
+**Deploy**:
+```bash
+supabase functions deploy suggest-gifts
+# Or auto-deploy via Vercel
+```
+
+**Testing locally**:
+```bash
+# Start Supabase locally
+supabase start
+
+# Serve edge function with secrets from .env.local
+supabase functions serve suggest-gifts --env-file .env.local
+
+# Test with curl
+curl -X POST http://localhost:54321/functions/v1/suggest-gifts \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"relation":"Friend","occasion":"Birthday","budget_min":500,"budget_max":2000,"hobbies":["Reading","Cooking"],"personalities":["Thoughtful","Creative"]}'
+```
 
 ## Project-Specific Details
 
 ### Gift Detail Pages
-- Route: `/gift/:id`
-- Data source: `sessionStorage` key `giftguru:last_suggestions` (future: replace with DB)
-- Share URLs built via `src/utils/shareUrl.ts` using `VITE_FRONTEND_BASE_URL`
-- SEO tags (title, og:image, canonical) in `GiftDetail.tsx`
+- **Route**: `/gift/:id`
+- **Data Source**: `sessionStorage` key `giftguru:last_suggestions` (array of Gift objects)
+  - ⚠️ **IMPORTANT**: This is temporary storage. Future: migrate to `gifts` table in DB
+  - Data set in `Home.tsx` and `Index.tsx` after successful AI response
+- **Share URLs**: Built via `src/utils/shareUrl.ts`
+  - Uses `VITE_FRONTEND_BASE_URL` env var (production) or `window.location.origin` (dev)
+  - Format: `{baseUrl}/gift/{giftId}`
+- **SEO Tags**: `<Helmet>` component adds dynamic title, og:image, canonical URL in `GiftDetail.tsx`
 
 ### Image Caching Strategy
-- Cache key: `{gift_title}_{tag1}_{tag2}_{tag3}` (normalized, lowercase)
-- Table schema: `gift_image_cache(id, search_key UNIQUE, image_urls JSONB, attribution JSONB, created_at, updated_at)`
-- Sizes: thumb (320x200), small (480x300), regular (1200x700), raw (original)
-- Cache hit → use cached URLs; miss → fetch from Unsplash → store in DB → return
+**Cache Key Logic** (in `supabase/functions/suggest-gifts/index.ts`, line ~35):
+```typescript
+createSearchKey(title, tags) {
+  // Format: "title_tag1_tag2_..._tag12"
+  // Normalized: lowercase, non-alphanum → underscore, max 200 chars
+  // Example: "wireless_headphones_tech_music_gadget"
+}
+```
+
+**Table Schema**: `gift_image_cache`
+- `search_key` (TEXT, UNIQUE): normalized search key
+- `image_urls` (JSONB): `{ raw, regular, small, thumb }` with Unsplash URLs
+- `attribution` (JSONB): `{ photographer, photographer_url, unsplash_url }`
+- `created_at`, `updated_at` (TIMESTAMPTZ)
+
+**Flow**:
+1. Check cache by `search_key`
+2. Cache hit → return `image_urls`
+3. Cache miss → query Unsplash API → store result → return
+
+**Image Sizes**:
+- `thumb`: 320x200 (gift cards in list view)
+- `small`: 480x300 (thumbnails)
+- `regular`: 1200x700 (detail pages)
+- `raw`: Original URL (for maximum quality)
 
 ### Authentication & Authorization
-- Supabase Auth session managed globally in `App.tsx` (`useEffect` with `onAuthStateChange`)
-- Protected routes redirect to `/` (Auth page) if no session
-- Search history RLS: users see own history + global (anonymized) history
-- Admin operations use SERVICE_ROLE_KEY in edge function
+**Global Auth State**: Managed in `App.tsx` via `useEffect` with `supabase.auth.onAuthStateChange()`
+- Session persisted across page reloads
+- Protected routes redirect to `/auth` if no session
+- Uses `Navigate` component from React Router v6
+
+**Dual Auth Support**:
+1. **Email/Password**: Validation in `Auth.tsx` (min 6 chars, email format, password match)
+2. **Google OAuth**: One-click sign-in via `supabase.auth.signInWithOAuth({ provider: 'google' })`
+
+**RLS Policies** (User-Scoped):
+- `search_history`: Users see own history (`auth.uid() = user_id`)
+  - **Exception**: Global trending uses separate query without user filter
+- `favorites`: Users can only favorite/unfavorite own gifts
+- `gifts`: Users can only read/write own gifts (future feature)
+
+**Admin Operations**: Edge function uses `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS for:
+- Writing to `gift_image_cache` (shared cache)
+- Reading/writing `search_history` (for analytics)
+
+### Favorites System
+**Implementation**: `src/lib/favorites.ts` exports:
+- `fetchFavoriteGiftIds()`: Returns array of `gift_id` strings for current user
+- `toggleFavoriteForUser(giftId, currentlyFavorited)`: Insert/delete favorite row
+  - Idempotent: duplicate inserts treated as success (error code `23505`)
+  - Returns `true` if favorited, `false` if unfavorited
+
+**Usage Pattern**:
+```tsx
+const favoriteIds = await fetchFavoriteGiftIds();
+const isFavorited = favoriteIds.includes(gift.id);
+const newState = await toggleFavoriteForUser(gift.id, isFavorited);
+```
 
 ## Common Tasks
 
 ### Adding a New UI Component
-1. Use `shadcn-ui` primitives from `src/components/ui/` (auto-generated)
-2. Compose in feature components (e.g., `BudgetSlider`, `HobbySelector`)
-3. Follow Tailwind classes + Framer Motion for animations
+1. **Use shadcn-ui CLI**: `npx shadcn-ui add <component-name>`
+   - Never manually edit files in `src/components/ui/`
+   - Components auto-generated with proper Tailwind + Radix primitives
+2. **Compose feature components**: Import UI primitives into feature components
+   - Example: `BudgetSlider` uses `<Slider>` from `@/components/ui/slider`
+3. **Styling**: Use Tailwind utility classes + Framer Motion for animations
+   - Global styles in `src/index.css` and `src/App.css`
 
 ### Modifying Gift Suggestion Logic
-1. Update edge function at `supabase/functions/suggest-gifts/index.ts`
-2. Adjust AI prompt, filtering, or ranking logic in function body
-3. Ensure CORS headers and error handling match pattern
+**Location**: `supabase/functions/suggest-gifts/index.ts`
+
+**AI Prompt Engineering** (lines 320-450):
+- Prompt instructs Gemini to return JSON array of gifts
+- Constraints: budget, hobbies, personalities, occasion, relation
+- Schema enforcement: `title`, `description`, `price_min`, `price_max`, `match_score`, `matched_tags`, `ai_rationale`, `delivery_estimate`, `vendor`
+
+**JSON Recovery** (lines 650-750, 5 levels):
+1. Direct `JSON.parse()`
+2. Extract between `[` and `]` (greedy)
+3. Extract from markdown fences (```json...```)
+4. Extract individual `{...}` objects, repair trailing commas
+5. Manual object assembly (last resort)
+
+**CORS Headers**: Stored in outer scope (`corsHeaders`) to reuse in error responses
+- Pattern: Build once from `req.headers.get('origin')`, validate against `FRONTEND_ALLOWED_ORIGINS`
 
 ### Updating Database Schema
-1. Create timestamped migration in `supabase/migrations/`
-2. Test locally: `supabase migration up`
-3. Document any RLS changes (see `20251205_fix_search_history_rls.sql`)
+**Migration Pattern**:
+```bash
+# Create timestamped migration
+supabase migration new fix_something
+
+# Write SQL in supabase/migrations/<timestamp>_fix_something.sql
+# Example: Add column, create index, update RLS policy
+
+# Test locally
+supabase migration up
+
+# Deploy (auto via Vercel or manual)
+supabase db push
+```
+
+**RLS Policy Pattern** (from `20251205_fix_search_history_rls.sql`):
+```sql
+-- Enable RLS
+ALTER TABLE my_table ENABLE ROW LEVEL SECURITY;
+
+-- User-scoped SELECT
+CREATE POLICY "Users can select their own rows"
+  ON my_table FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+
+-- User-scoped INSERT with CHECK
+CREATE POLICY "Users can insert their own rows"
+  ON my_table FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+```
 
 ### Debugging Tips
-- Frontend: Use React DevTools, check console for Supabase errors
-- Backend: Check edge function logs in Supabase dashboard or deploy output
-- Common errors: See [DEBUGGING.md](DEBUGGING.md) for troubleshooting gift generation failures
-- Cache issues: Delete rows from `gift_image_cache` to force refresh
-- CORS errors: Verify `FRONTEND_ALLOWED_ORIGINS` env var matches frontend URL
-- Auth issues: Validate JWT in `validateAuthToken` function (line ~150 in edge function)
+**Frontend**:
+- React DevTools for component state/props
+- Console errors for Supabase client issues
+- Network tab for edge function responses
+
+**Backend**:
+- Supabase Dashboard → Edge Functions → `suggest-gifts` → Logs
+- Check for: `AI_API_KEY not configured`, `Unauthorized`, Gemini API errors
+
+**Common Issues**:
+1. **CORS errors**: Verify `FRONTEND_ALLOWED_ORIGINS` matches frontend URL (CSV list or single URL)
+2. **Auth errors**: Check JWT validation in `validateAuthToken()` (~line 150)
+3. **Cache issues**: Delete stale rows from `gift_image_cache` table
+4. **AI response failures**: See [DEBUGGING.md](DEBUGGING.md) for Gemini-specific troubleshooting
+
+**Recent Fixes** (Dec 30, 2025):
+- ✅ Gemini MAX_TOKENS error: Increased `maxOutputTokens` from 2048 → 8192 (accounts for 1500-2000 "thoughts tokens")
+- ✅ CORS error on exceptions: Store `corsHeaders` in outer scope to reuse in catch blocks
 
 ## Security Issues & Recent Fixes
 

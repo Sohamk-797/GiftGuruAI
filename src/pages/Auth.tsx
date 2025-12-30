@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
 import { DarkModeToggle } from "@/components/DarkModeToggle";
-import { Gift, Sparkles, ArrowRight, Heart, Star, Zap } from "lucide-react";
+import { Gift, Sparkles, ArrowRight, Heart, Star, Zap, User, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 
 const features = [
@@ -31,6 +33,19 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  
+  // Form state
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [errors, setErrors] = useState<{
+    username?: string;
+    password?: string;
+    confirmPassword?: string;
+  }>({});
 
   useEffect(() => {
     // Check if user is already logged in
@@ -56,11 +71,120 @@ const Auth = () => {
     return () => subscription.unsubscribe();
   }, [navigate, toast]);
 
+  const validateForm = () => {
+    const newErrors: typeof errors = {};
+    
+    // Username validation
+    const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
+    if (!username) {
+      newErrors.username = "Username is required";
+    } else if (!usernameRegex.test(username)) {
+      newErrors.username = "Username must be 3-20 characters (letters, numbers, underscore only)";
+    }
+    
+    // Password validation
+    if (!password) {
+      newErrors.password = "Password is required";
+    } else if (password.length < 6) {
+      newErrors.password = "Password must be at least 6 characters";
+    }
+    
+    // Confirm password validation (only for signup)
+    if (isSignUp) {
+      if (!confirmPassword) {
+        newErrors.confirmPassword = "Please confirm your password";
+      } else if (password !== confirmPassword) {
+        newErrors.confirmPassword = "Passwords do not match";
+      }
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleUsernameAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+    
+    setLoading(true);
+    
+    try {
+      // Convert username to synthetic email format
+      const syntheticEmail = `${username.toLowerCase()}@giftguru.app`;
+      
+      if (isSignUp) {
+        // Sign up with username (converted to synthetic email)
+        const { data, error } = await supabase.auth.signUp({
+          email: syntheticEmail,
+          password,
+          options: {
+            data: {
+              username: username,
+              display_name: username,
+            },
+            emailRedirectTo: `${window.location.origin}/home`,
+          },
+        });
+        
+        if (error) throw error;
+        
+        if (data.user) {
+          toast({
+            title: "Account created!",
+            description: `Welcome, ${username}! You can now sign in.`,
+          });
+          // Switch to sign in mode
+          setIsSignUp(false);
+          setPassword("");
+          setConfirmPassword("");
+        }
+      } else {
+        // Sign in with username (converted to synthetic email)
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: syntheticEmail,
+          password,
+        });
+        
+        if (error) throw error;
+        
+        if (data.session) {
+          const displayName = data.user.user_metadata?.username || username;
+          toast({
+            title: "Welcome back!",
+            description: `Good to see you, ${displayName}!`,
+          });
+          navigate("/home");
+        }
+      }
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      
+      let errorMessage = error.message;
+      
+      // Handle specific Supabase errors
+      if (error.message.includes("Invalid login credentials")) {
+        errorMessage = "Invalid username or password. Please try again.";
+      } else if (error.message.includes("Email not confirmed")) {
+        errorMessage = "Please verify your account before signing in.";
+      } else if (error.message.includes("User already registered")) {
+        errorMessage = "This username is already taken. Please choose another.";
+      }
+      
+      toast({
+        title: isSignUp ? "Sign up failed" : "Sign in failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
       const redirectUrl = `/home`;
-      // const redirectUrl = `${window.location.origin}/search`;
       
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -83,6 +207,13 @@ const Auth = () => {
       });
       setLoading(false);
     }
+  };
+  
+  const toggleAuthMode = () => {
+    setIsSignUp(!isSignUp);
+    setErrors({});
+    setPassword("");
+    setConfirmPassword("");
   };
 
   return (
@@ -169,17 +300,163 @@ const Auth = () => {
               >
                 <Gift className="h-8 w-8 text-primary-foreground" />
               </motion.div>
-              <CardTitle className="text-2xl">Get Started</CardTitle>
+              <CardTitle className="text-2xl">{isSignUp ? "Create Account" : "Welcome Back"}</CardTitle>
               <CardDescription>
-                Sign in to save your gift suggestions and access them anytime
+                {isSignUp 
+                  ? "Sign up to save your gift suggestions and access them anytime"
+                  : "Sign in to continue finding perfect gifts"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Username/Password Form */}
+              <form onSubmit={handleUsernameAuth} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username" className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    Username
+                  </Label>
+                  <Input
+                    id="username"
+                    type="text"
+                    placeholder="johndoe"
+                    value={username}
+                    onChange={(e) => {
+                      setUsername(e.target.value);
+                      if (errors.username) setErrors({ ...errors, username: undefined });
+                    }}
+                    className={errors.username ? "border-destructive" : ""}
+                    disabled={loading}
+                    autoComplete="username"
+                  />
+                  {errors.username && (
+                    <div className="flex items-center gap-1 text-sm text-destructive">
+                      <AlertCircle className="h-3 w-3" />
+                      {errors.username}
+                    </div>
+                  )}
+                  {!errors.username && isSignUp && (
+                    <p className="text-xs text-muted-foreground">
+                      3-20 characters, letters, numbers, and underscore only
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="flex items-center gap-2">
+                    <Lock className="h-4 w-4" />
+                    Password
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (errors.password) setErrors({ ...errors, password: undefined });
+                      }}
+                      className={errors.password ? "border-destructive pr-10" : "pr-10"}
+                      disabled={loading}
+                      autoComplete={isSignUp ? "new-password" : "current-password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      disabled={loading}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <div className="flex items-center gap-1 text-sm text-destructive">
+                      <AlertCircle className="h-3 w-3" />
+                      {errors.password}
+                    </div>
+                  )}
+                  {!errors.password && isSignUp && (
+                    <p className="text-xs text-muted-foreground">
+                      Password must be at least 6 characters
+                    </p>
+                  )}
+                </div>
+
+                {isSignUp && (
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword" className="flex items-center gap-2">
+                      <Lock className="h-4 w-4" />
+                      Confirm Password
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="confirmPassword"
+                        type={showConfirmPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(e) => {
+                          setConfirmPassword(e.target.value);
+                          if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+                        }}
+                        className={errors.confirmPassword ? "border-destructive pr-10" : "pr-10"}
+                        disabled={loading}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        disabled={loading}
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {errors.confirmPassword && (
+                      <div className="flex items-center gap-1 text-sm text-destructive">
+                        <AlertCircle className="h-3 w-3" />
+                        {errors.confirmPassword}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-12"
+                  size="lg"
+                >
+                  {loading ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-background border-t-transparent rounded-full animate-spin mr-2" />
+                      {isSignUp ? "Creating account..." : "Signing in..."}
+                    </>
+                  ) : (
+                    <>
+                      {isSignUp ? "Create Account" : "Sign In"}
+                      <ArrowRight className="ml-auto h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </form>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                </div>
+              </div>
+
+              {/* Google Sign In */}
               <Button
                 onClick={handleGoogleSignIn}
                 disabled={loading}
                 className="w-full bg-card hover:bg-muted text-foreground border-2 border-border shadow-sm btn-hover-lift h-12"
                 size="lg"
+                type="button"
               >
                 {loading ? (
                   <>
@@ -206,15 +483,28 @@ const Auth = () => {
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                       />
                     </svg>
-                    Continue with Google
-                    <ArrowRight className="ml-auto h-4 w-4" />
+                    Google
                   </>
                 )}
               </Button>
 
+              {/* Toggle Sign Up/Sign In */}
+              <div className="text-center text-sm">
+                <button
+                  type="button"
+                  onClick={toggleAuthMode}
+                  disabled={loading}
+                  className="text-primary hover:underline disabled:opacity-50"
+                >
+                  {isSignUp 
+                    ? "Already have an account? Sign in" 
+                    : "Don't have an account? Sign up"}
+                </button>
+              </div>
+
               <div className="text-center text-xs text-muted-foreground pt-2">
                 <p>
-                  By signing in, you agree to our Terms of Service and Privacy Policy
+                  By {isSignUp ? "signing up" : "signing in"}, you agree to our Terms of Service and Privacy Policy
                 </p>
               </div>
             </CardContent>
