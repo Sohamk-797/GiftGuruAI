@@ -15,6 +15,7 @@ import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Home from "./pages/Home";
+import SeoPageRouter from "./pages/SeoPageRouter";
 
 const queryClient = new QueryClient();
 
@@ -58,12 +59,20 @@ const AnimatedRoutes = ({ session }: { session: Session | null }) => {
             path="/"
             element={session ? <Navigate to="/home" replace /> : <Auth />}
           />
+          <Route path="/auth" element={<Auth />} />
           <Route path="/home" element={<Home session={session} />} />
           <Route path="/search" element={<Index session={session} />} />
           <Route path="/my-gifts" element={<MyGifts />} />
           <Route path="/gift/:id" element={<GiftDetail />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          
+          {/* SEO Pages - Match all programmatic SEO URLs */}
+          <Route path="/gifts-for-:slug" element={<SeoPageRouter />} />
+          <Route path="/:occasion-gifts" element={<SeoPageRouter />} />
+          <Route path="/:occasion-gifts-for-:relation" element={<SeoPageRouter />} />
+          <Route path="/:slug" element={<SeoPageRouter />} />
+          
           <Route path="*" element={<NotFound />} />
         </Routes>
       </motion.div>

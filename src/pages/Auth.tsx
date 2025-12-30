@@ -33,18 +33,14 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
   
   // Form state
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<{
     username?: string;
     password?: string;
-    confirmPassword?: string;
   }>({});
 
   useEffect(() => {
@@ -89,15 +85,6 @@ const Auth = () => {
       newErrors.password = "Password must be at least 6 characters";
     }
     
-    // Confirm password validation (only for signup)
-    if (isSignUp) {
-      if (!confirmPassword) {
-        newErrors.confirmPassword = "Please confirm your password";
-      } else if (password !== confirmPassword) {
-        newErrors.confirmPassword = "Passwords do not match";
-      }
-    }
-    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -110,74 +97,76 @@ const Auth = () => {
     setLoading(true);
     
     try {
-      // Convert username to synthetic email format
-      const syntheticEmail = `${username.toLowerCase()}@giftguru.app`;
-      
-      if (isSignUp) {
-        // Sign up with username (converted to synthetic email)
-        const { data, error } = await supabase.auth.signUp({
-          email: syntheticEmail,
+      // Call custom auth edge function (handles both login and auto-signup)
+      const { data: { url } } = await supabase.functions.invoke('custom-auth', {
+        body: {
+          username: username.toLowerCase().trim(),
           password,
-          options: {
-            data: {
-              username: username,
-              display_name: username,
-            },
-            emailRedirectTo: `${window.location.origin}/home`,
-          },
-        });
-        
-        if (error) throw error;
-        
-        if (data.user) {
-          toast({
-            title: "Account created!",
-            description: `Welcome, ${username}! You can now sign in.`,
-          });
-          // Switch to sign in mode
-          setIsSignUp(false);
-          setPassword("");
-          setConfirmPassword("");
-        }
-      } else {
-        // Sign in with username (converted to synthetic email)
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: syntheticEmail,
+        },
+      });
+
+      // The edge function returns the full URL, extract the response
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: username.toLowerCase().trim(),
           password,
-        });
-        
-        if (error) throw error;
-        
-        if (data.session) {
-          const displayName = data.user.user_metadata?.username || username;
-          toast({
-            title: "Welcome back!",
-            description: `Good to see you, ${displayName}!`,
-          });
-          navigate("/home");
-        }
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Authentication failed');
       }
+
+      const authResult = await response.json();
+
+      if (!authResult.success) {
+        throw new Error(authResult.error || 'Authentication failed');
+      }
+
+      // Set the session using the token from custom auth
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: authResult.user.token,
+        refresh_token: authResult.user.token, // Use same token for simplicity
+      });
+
+      if (sessionError) {
+        console.error('Session error:', sessionError);
+        throw sessionError;
+      }
+
+      // Show success message
+      if (authResult.created) {
+        toast({
+          title: "Account created!",
+          description: `Welcome, ${authResult.user.username}! Your account has been created and you're now signed in.`,
+        });
+      } else {
+        toast({
+          title: "Welcome back!",
+          description: `Good to see you, ${authResult.user.username}!`,
+        });
+      }
+
+      // Navigate to home
+      navigate("/home");
+
     } catch (error: any) {
       console.error('Auth error:', error);
       
-      let errorMessage = error.message;
-      
-      // Handle specific Supabase errors
-      if (error.message.includes("Invalid login credentials")) {
-        errorMessage = "Invalid username or password. Please try again.";
-      } else if (error.message.includes("Email not confirmed")) {
-        errorMessage = "Please verify your account before signing in.";
-      } else if (error.message.includes("User already registered")) {
-        errorMessage = "This username is already taken. Please choose another.";
-      }
+      let errorMessage = error.message || 'Authentication failed';
       
       toast({
-        title: isSignUp ? "Sign up failed" : "Sign in failed",
+        title: "Authentication failed",
         description: errorMessage,
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoading(true);
     }
   };
 
@@ -209,12 +198,7 @@ const Auth = () => {
     }
   };
   
-  const toggleAuthMode = () => {
-    setIsSignUp(!isSignUp);
-    setErrors({});
-    setPassword("");
-    setConfirmPassword("");
-  };
+  // Remove toggleAuthMode function - no longer needed
 
   return (
     <div className="min-h-screen relative flex items-center justify-center overflow-hidden">
@@ -300,11 +284,9 @@ const Auth = () => {
               >
                 <Gift className="h-8 w-8 text-primary-foreground" />
               </motion.div>
-              <CardTitle className="text-2xl">{isSignUp ? "Create Account" : "Welcome Back"}</CardTitle>
+              <CardTitle className="text-2xl">Sign In or Create Account</CardTitle>
               <CardDescription>
-                {isSignUp 
-                  ? "Sign up to save your gift suggestions and access them anytime"
-                  : "Sign in to continue finding perfect gifts"}
+                Enter your username and password. New users are automatically created!
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -334,9 +316,9 @@ const Auth = () => {
                       {errors.username}
                     </div>
                   )}
-                  {!errors.username && isSignUp && (
+                  {!errors.username && (
                     <p className="text-xs text-muted-foreground">
-                      3-20 characters, letters, numbers, and underscore only
+                      3-20 characters. New usernames are automatically registered!
                     </p>
                   )}
                 </div>
@@ -375,50 +357,12 @@ const Auth = () => {
                       {errors.password}
                     </div>
                   )}
-                  {!errors.password && isSignUp && (
+                  {!errors.password && (
                     <p className="text-xs text-muted-foreground">
-                      Password must be at least 6 characters
+                      Minimum 6 characters
                     </p>
                   )}
                 </div>
-
-                {isSignUp && (
-                  <div className="space-y-2">
-                    <Label htmlFor="confirmPassword" className="flex items-center gap-2">
-                      <Lock className="h-4 w-4" />
-                      Confirm Password
-                    </Label>
-                    <div className="relative">
-                      <Input
-                        id="confirmPassword"
-                        type={showConfirmPassword ? "text" : "password"}
-                        placeholder="••••••••"
-                        autoComplete="new-password"
-                        value={confirmPassword}
-                        onChange={(e) => {
-                          setConfirmPassword(e.target.value);
-                          if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
-                        }}
-                        className={errors.confirmPassword ? "border-destructive pr-10" : "pr-10"}
-                        disabled={loading}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        disabled={loading}
-                      >
-                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {errors.confirmPassword && (
-                      <div className="flex items-center gap-1 text-sm text-destructive">
-                        <AlertCircle className="h-3 w-3" />
-                        {errors.confirmPassword}
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 <Button
                   type="submit"
@@ -429,11 +373,11 @@ const Auth = () => {
                   {loading ? (
                     <>
                       <div className="w-5 h-5 border-2 border-background border-t-transparent rounded-full animate-spin mr-2" />
-                      {isSignUp ? "Creating account..." : "Signing in..."}
+                      Signing in...
                     </>
                   ) : (
                     <>
-                      {isSignUp ? "Create Account" : "Sign In"}
+                      Continue
                       <ArrowRight className="ml-auto h-4 w-4" />
                     </>
                   )}
@@ -488,23 +432,11 @@ const Auth = () => {
                 )}
               </Button>
 
-              {/* Toggle Sign Up/Sign In */}
-              <div className="text-center text-sm">
-                <button
-                  type="button"
-                  onClick={toggleAuthMode}
-                  disabled={loading}
-                  className="text-primary hover:underline disabled:opacity-50"
-                >
-                  {isSignUp 
-                    ? "Already have an account? Sign in" 
-                    : "Don't have an account? Sign up"}
-                </button>
-              </div>
+              {/* Toggle removed - auto-signup handles both cases */}
 
               <div className="text-center text-xs text-muted-foreground pt-2">
                 <p>
-                  By {isSignUp ? "signing up" : "signing in"}, you agree to our Terms of Service and Privacy Policy
+                  By continuing, you agree to our Terms of Service and Privacy Policy
                 </p>
               </div>
             </CardContent>
