@@ -208,6 +208,9 @@ serve(async (req: Request) => {
     .filter(Boolean);
 
   const requestOrigin = (req.headers.get('origin') || '').toLowerCase();
+  
+  // Store these for error handler access (declared here so catch block can use them)
+  let corsHeaders: Record<string, string> = {};
 
   // Decide response origin header: echo the request origin if allowed; otherwise fall back to first allowed origin or null.
   let responseOrigin: string | null = null;
@@ -226,7 +229,7 @@ serve(async (req: Request) => {
   };
 
   // Build final CORS headers object (only include Access-Control-Allow-Origin if we have a value)
-  const corsHeaders: Record<string, string> = responseOrigin
+  corsHeaders = responseOrigin
     ? { 'Access-Control-Allow-Origin': responseOrigin, ...corsHeadersBase }
     : { ...corsHeadersBase };
 
@@ -530,12 +533,14 @@ Now produce the JSON array of candidate gifts (no prose).`;
     throw e;
   }
 
-// Primary attempt: generous token allowance but conservative start
+// Primary attempt: Start with 8192 tokens to account for Gemini 2.5's thoughtsTokenCount
+// Gemini 2.5 uses internal "thoughts" tokens (1500-2000) that count toward maxOutputTokens
 let geminiData: any = null;
 try {
-  geminiData = await sendGeminiRequest({ temperature: 0.7, maxOutputTokens: 2048 });
+  geminiData = await sendGeminiRequest({ temperature: 0.7, maxOutputTokens: 8192 });
 
-  // If model got truncated (MAX_TOKENS) and produced no text, retry once with larger maxOutputTokens
+  // If model got truncated (MAX_TOKENS), retry with even larger limit
+  // Note: Retry on ANY MAX_TOKENS, not just when !hasContentText, because partial JSON is still a failure
   const candidate = Array.isArray(geminiData?.candidates) && geminiData.candidates.length > 0 ? geminiData.candidates[0] : null;
   const finishReason = candidate?.finishReason ?? candidate?.finish_reason ?? null;
   const hasContentText = (() => {
@@ -557,10 +562,11 @@ try {
     } catch (e) { return false; }
   })();
 
-  if ((finishReason === 'MAX_TOKENS' || finishReason === 'max_tokens') && !hasContentText) {
-    console.warn('Gemini response was truncated (MAX_TOKENS) and returned no text — retrying with larger maxOutputTokens (4096).');
-    // Retry once with a larger allowance
-    geminiData = await sendGeminiRequest({ temperature: 0.7, maxOutputTokens: 4096 });
+  // Retry on MAX_TOKENS even if partial content exists (truncated JSON is invalid)
+  if (finishReason === 'MAX_TOKENS' || finishReason === 'max_tokens') {
+    console.warn(`Gemini response was truncated (MAX_TOKENS). Partial content detected: ${hasContentText}. Retrying with maxOutputTokens: 16384.`);
+    // Retry once with a much larger allowance
+    geminiData = await sendGeminiRequest({ temperature: 0.7, maxOutputTokens: 16384 });
   }
 } catch (err) {
   // Bubble up with clear logs
@@ -1211,18 +1217,16 @@ try {
       details: (error as any)?.details,
     });
 
-    // Resolve allowed origin like earlier
-    const envAllowed = (Deno.env.get('FRONTEND_ALLOWED_ORIGINS') || Deno.env.get('VITE_FRONTEND_BASE_URL') || 'http://localhost:8080');
-    const allowedOrigins = envAllowed
-      .split(',')
-      .map((s: string) => s.trim())
-      .filter(Boolean);
-    const requestOrigin = (req.headers.get('origin') || '').toLowerCase();
-    const responseOrigin = requestOrigin && allowedOrigins.some((a: string) => a.toLowerCase() === requestOrigin) ? requestOrigin : (allowedOrigins[0] || null);
-
-    const errorCorsHeaders: Record<string, string> = responseOrigin
-      ? { 'Access-Control-Allow-Origin': responseOrigin, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' }
-      : { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Credentials': 'true' };
+    // Use corsHeaders from outer scope (already built at start of request)
+    // Fallback to minimal CORS if somehow not set
+    const errorCorsHeaders = Object.keys(corsHeaders).length > 0
+      ? corsHeaders
+      : {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+          'Access-Control-Allow-Credentials': 'true'
+        };
 
     // Build structured error response
     const code = (error as any)?.code || 'internal_error';
