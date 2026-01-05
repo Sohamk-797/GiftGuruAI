@@ -1,3 +1,8 @@
+-- ============================================================================
+-- COPY THIS ENTIRE FILE AND RUN IN SUPABASE SQL EDITOR
+-- Dashboard → SQL Editor → New Query → Paste → Run
+-- ============================================================================
+
 -- Migration: Add username/password authentication system with auto-signup
 -- 2025-12-30: Implement custom auth alongside Supabase OAuth
 
@@ -24,6 +29,10 @@ CREATE INDEX IF NOT EXISTS idx_custom_auth_supabase_user ON public.custom_auth_u
 -- Enable RLS
 ALTER TABLE public.custom_auth_users ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (to avoid conflicts)
+DROP POLICY IF EXISTS "Users can view own custom_auth record" ON public.custom_auth_users;
+DROP POLICY IF EXISTS "Service role can manage custom_auth users" ON public.custom_auth_users;
+
 -- Users can only read their own record
 CREATE POLICY "Users can view own custom_auth record"
   ON public.custom_auth_users FOR SELECT
@@ -37,7 +46,7 @@ CREATE POLICY "Service role can manage custom_auth users"
   USING (true)
   WITH CHECK (true);
 
--- Extend search_history to always require user_id (already exists, just ensuring NOT NULL)
+-- Extend search_history to always require user_id
 -- This migration makes user_id mandatory for all future searches
 DO $$ 
 BEGIN
@@ -61,8 +70,11 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_search_history_user_id 
   ON public.search_history(user_id);
 
+-- Drop existing view if it exists
+DROP VIEW IF EXISTS public.unified_users;
+
 -- Create a view that unifies OAuth and custom auth users
-CREATE OR REPLACE VIEW public.unified_users AS
+CREATE VIEW public.unified_users AS
 SELECT 
   au.id as user_id,
   au.email as identifier,
@@ -85,3 +97,8 @@ WHERE cau.supabase_user_id IS NOT NULL;
 
 -- Comment explaining the design
 COMMENT ON TABLE public.custom_auth_users IS 'Custom username/password authentication with auto-signup. Works alongside Supabase OAuth. Every custom auth user gets a linked Supabase user record for unified tracking.';
+
+-- ============================================================================
+-- MIGRATION COMPLETE
+-- Next: Set edge function secrets in Dashboard → Functions → custom-auth
+-- ============================================================================

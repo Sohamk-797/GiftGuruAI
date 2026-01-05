@@ -177,28 +177,7 @@ const Privacy = () => {
                   "Last updated" date.
                 </p>
               </section>
-
-              <section>
-                <h2>11. Contact</h2>
-                <p>
-                  If you have questions, want to access or delete your data, or otherwise contact us,
-                  please email:
-                </p>
-                <p className="font-medium">
-                  📧{" "}
-                  <a
-                    href="mailto:sohamk797@gmail.com"
-                    className="text-primary underline hover:text-primary/90"
-                  >
-                    sohamk797@gmail.com
-                  </a>
-                </p>
-                <p className="mt-4">
-                  We will respond to verified requests as promptly as possible and in accordance
-                  with applicable law.
-                </p>
-              </section>
-
+              
               <div className="mt-8 flex justify-center gap-4">
                 <a href="/" className="no-underline">
                   <Button variant="outline">Return to Home</Button>

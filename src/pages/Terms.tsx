@@ -209,28 +209,7 @@ const Terms = () => {
               </section>
 
               <section>
-                <h2>16. Contact & Notices</h2>
-                <p>
-                  For questions about these Terms, to request account deletion, or to report abuse,
-                  contact:
-                </p>
-                <p className="font-medium">
-                  📧{" "}
-                  <a
-                    href="mailto:sohamk797@gmail.com"
-                    className="text-primary underline hover:text-primary/90"
-                  >
-                    sohamk797@gmail.com
-                  </a>
-                </p>
-                <p className="mt-4">
-                  We will respond to verified requests as promptly as reasonably possible and in
-                  accordance with applicable laws.
-                </p>
-              </section>
-
-              <section>
-                <h2>17. Miscellaneous</h2>
+                <h2>16. Miscellaneous</h2>
                 <ul>
                   <li>
                     <strong>Entire Agreement:</strong> These Terms, together with the Privacy Policy
