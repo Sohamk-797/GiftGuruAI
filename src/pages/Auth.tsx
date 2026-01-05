@@ -166,7 +166,7 @@ const Auth = () => {
         variant: "destructive",
       });
     } finally {
-      setLoading(true);
+      setLoading(false);
     }
   };
 
@@ -340,7 +340,7 @@ const Auth = () => {
                       }}
                       className={errors.password ? "border-destructive pr-10" : "pr-10"}
                       disabled={loading}
-                      autoComplete={isSignUp ? "new-password" : "current-password"}
+                      autoComplete="current-password"
                     />
                     <button
                       type="button"
